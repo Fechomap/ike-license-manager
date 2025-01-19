@@ -1,17 +1,26 @@
 {
   "name": "ike-license-manager",
   "version": "1.0.0",
+  "description": "Sistema de gestión de licencias con integración de Telegram y WhatsApp",
   "main": "src/app.js",
   "scripts": {
     "start": "node src/app.js",
     "dev": "nodemon src/app.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  },
+  "keywords": [
+    "license-manager",
+    "telegram-bot",
+    "whatsapp-integration"
+  ],
   "author": "",
   "license": "ISC",
-  "description": "",
   "dependencies": {
+    "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
