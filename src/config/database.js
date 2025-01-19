@@ -4,15 +4,12 @@ const config = require('./config');
 
 const connectDB = async () => {
   try {
-    await mongoose.connect(config.mongodbURI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-      // Puedes agregar más opciones de conexión si lo deseas
-    });
-    console.log('Conexión a MongoDB exitosa');
+    // Removemos las opciones deprecadas
+    await mongoose.connect(config.mongodbURI);
+    console.log('✅ Conexión exitosa a MongoDB');
   } catch (error) {
-    console.error('Error al conectar a MongoDB:', error);
-    process.exit(1); // Salir en caso de error crítico
+    console.error('❌ Error al conectar a MongoDB:', error);
+    process.exit(1);
   }
 };
 
