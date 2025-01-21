@@ -59,10 +59,14 @@ exports.getAllTokens = async (req, res) => {
 };
 
 async function sendTokensToTelegram(tokens) {
-  // Aquí escribes la lógica para enviar los tokens de 5 en 5 a través del bot de Telegram
-  for (const token of tokens) {
-    // Construye el mensaje a enviar y envíalo al bot
-    const message = `Token: ${token.token}\nUsuario: ${token.user}\nEmail: ${token.email}\nEstado: ${token.status}\nDías restantes: ${token.daysRemaining}`;
+  const batchSize = 10; // Tamaño de lote a enviar
+
+  for (let i = 0; i < tokens.length; i += batchSize) {
+    const batch = tokens.slice(i, i + batchSize);
+    const message = batch.map(token => (
+      `Token: ${token.token}\nUsuario: ${token.user}\nEmail: ${token.email}\nEstado: ${token.status}\nDías restantes: ${token.daysRemaining}`
+    )).join('\n\n');
+
     await telegramService.sendMessage(process.env.ADMIN_CHAT_ID, message);
   }
 }
