@@ -20,7 +20,7 @@ class TelegramService {
       try {
         const tokens = await tokenService.getAllTokens();
         let message = '📋 Lista de tokens:\n\n';
-        
+    
         tokens.forEach(token => {
           const status = token.isRedeemed ? '✅ Canjeado' : '⏳ No canjeado';
           message += `🔑 Token: ${token.token}\n`;
@@ -30,21 +30,20 @@ class TelegramService {
           message += `⏰ Días restantes: ${token.remainingDays}\n\n`;
         });
     
-        // *** CORRECCIÓN: Envío en chunks si el texto es muy largo ***
-        const chunkSize = 4000; // Aproximado al límite de 4096
+        const chunkSize = 4000; // Límite aproximado de Telegram
         if (message.length <= chunkSize) {
-          // Envía todo en un solo mensaje
+          // Enviar todo en un solo mensaje si es menor al límite
           await this.bot.sendMessage(msg.chat.id, message);
         } else {
-          // Divide el mensaje en trozos de 4000 caracteres
+          // Divide en bloques y añade delay
           let startIndex = 0;
           while (startIndex < message.length) {
             const chunk = message.slice(startIndex, startIndex + chunkSize);
             await this.bot.sendMessage(msg.chat.id, chunk);
             startIndex += chunkSize;
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Delay de 1 segundo
           }
         }
-        // *** FIN DE LA CORRECCIÓN ***
     
       } catch (error) {
         console.error('Error al listar tokens:', error);
