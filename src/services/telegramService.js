@@ -29,8 +29,23 @@ class TelegramService {
           message += `📅 Estado: ${status}\n`;
           message += `⏰ Días restantes: ${token.remainingDays}\n\n`;
         });
-
-        await this.bot.sendMessage(msg.chat.id, message);
+    
+        // *** CORRECCIÓN: Envío en chunks si el texto es muy largo ***
+        const chunkSize = 4000; // Aproximado al límite de 4096
+        if (message.length <= chunkSize) {
+          // Envía todo en un solo mensaje
+          await this.bot.sendMessage(msg.chat.id, message);
+        } else {
+          // Divide el mensaje en trozos de 4000 caracteres
+          let startIndex = 0;
+          while (startIndex < message.length) {
+            const chunk = message.slice(startIndex, startIndex + chunkSize);
+            await this.bot.sendMessage(msg.chat.id, chunk);
+            startIndex += chunkSize;
+          }
+        }
+        // *** FIN DE LA CORRECCIÓN ***
+    
       } catch (error) {
         console.error('Error al listar tokens:', error);
         await this.bot.sendMessage(msg.chat.id, '❌ Error al obtener la lista de tokens');
