@@ -19,32 +19,31 @@ class TelegramService {
     this.bot.onText(/\/listar_tokens/, async (msg) => {
       try {
         const tokens = await tokenService.getAllTokens();
-        let message = '📋 Lista de tokens:\n\n';
-    
-        tokens.forEach(token => {
-          const status = token.isRedeemed ? '✅ Canjeado' : '⏳ No canjeado';
-          message += `🔑 Token: ${token.token}\n`;
-          message += `👤 Usuario: ${token.name}\n`;
-          message += `📧 Email: ${token.email}\n`;
-          message += `📅 Estado: ${status}\n`;
-          message += `⏰ Días restantes: ${token.remainingDays}\n\n`;
-        });
-    
-        const chunkSize = 4000; // Límite aproximado de Telegram
-        if (message.length <= chunkSize) {
-          // Enviar todo en un solo mensaje si es menor al límite
-          await this.bot.sendMessage(msg.chat.id, message);
-        } else {
-          // Divide en bloques y añade delay
-          let startIndex = 0;
-          while (startIndex < message.length) {
-            const chunk = message.slice(startIndex, startIndex + chunkSize);
-            await this.bot.sendMessage(msg.chat.id, chunk);
-            startIndex += chunkSize;
-            await new Promise(resolve => setTimeout(resolve, 1000)); // Delay de 1 segundo
-          }
+
+        if (tokens.length === 0) {
+          await this.bot.sendMessage(msg.chat.id, '📋 No hay tokens para mostrar.');
+          return;
         }
-    
+
+        // Enviar encabezado
+        await this.bot.sendMessage(msg.chat.id, '📋 Lista de tokens:\n');
+
+        // Iterar sobre cada token y enviarlo individualmente con un retraso
+        for (const token of tokens) {
+          const status = token.isRedeemed ? '✅ Canjeado' : '⏳ No canjeado';
+          const tokenMessage = 
+            `🔑 *Token:* ${token.token}\n` +
+            `👤 *Usuario:* ${token.name}\n` +
+            `📧 *Email:* ${token.email}\n` +
+            `📅 *Estado:* ${status}\n` +
+            `⏰ *Días restantes:* ${token.remainingDays}`;
+
+          await this.bot.sendMessage(msg.chat.id, tokenMessage, { parse_mode: 'Markdown' });
+
+          // Retraso de 500 milisegundos
+          await this.sleep(500);
+        }
+
       } catch (error) {
         console.error('Error al listar tokens:', error);
         await this.bot.sendMessage(msg.chat.id, '❌ Error al obtener la lista de tokens');
@@ -75,6 +74,11 @@ class TelegramService {
     });
 
     this.bot.on('message', (msg) => this.handleMessage(msg));
+  }
+
+  // Función auxiliar para crear un retraso
+  sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   async handleStart(msg) {
