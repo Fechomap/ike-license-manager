@@ -1,16 +1,18 @@
-// src/routes/apiRoutes.js
+// En apiRoutes.js
+
 const express = require('express');
 const router = express.Router();
 const apiController = require('../controllers/apiController');
 
+// Rutas existentes
 router.get('/status', (req, res) => {
   res.json({ message: 'API funcionando correctamente' });
 });
 
-// Cambiado de validateLicense a validateToken
 router.post('/validate', apiController.validateToken);
-
-// Si existe el método getAllTokens en el controlador o en el servicio...
 router.get('/tokens', apiController.getAllTokens);
+
+// Nueva ruta para verificar vigencia
+router.get('/check-validity/:token', apiController.checkTokenValidity);
 
 module.exports = router;

@@ -53,6 +53,14 @@ exports.createToken = async (userData) => {
   }
 };
 
+
+exports.isTokenValid = async (token) => {
+  const tokenRecord = await Token.findOne({ token });
+  // Solo verifica existencia y que no haya expirado
+  return !!(tokenRecord && new Date() <= tokenRecord.expiresAt);
+};
+
+
 exports.getShareLinks = async (token) => {
   try {
     const tokenRecord = await Token.findOne({ token });

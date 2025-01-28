@@ -36,6 +36,22 @@ exports.validateToken = async (req, res) => {
   }
 };
 
+
+exports.checkTokenValidity = async (req, res) => {
+  try {
+    const { token } = req.params;
+    if (!token) {
+      return res.json(false);
+    }
+
+    const isValid = await tokenService.isTokenValid(token);
+    return res.json(isValid);
+  } catch (error) {
+    return res.json(false);
+  }
+};
+
+
 exports.getAllTokens = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
