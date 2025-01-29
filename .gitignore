@@ -58,3 +58,10 @@ build/
 
 # Local MongoDB data
 /data/db
+
+# Excel files in data directory
+src/scripts/data/*.xlsx
+src/scripts/data/*.xls
+
+# But keep the data directory
+!src/scripts/data/.gitkeep
