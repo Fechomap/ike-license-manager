@@ -97,45 +97,6 @@ exports.getAllTokens = async () => {
   }));
 };
 
-exports.validateAndRedeemToken = async (token, machineId, clientInfo) => {
-  const tokenRecord = await Token.findOne({ token });
-
-  if (!tokenRecord) {
-    return { success: false, message: 'Token no encontrado' };
-  }
-
-  if (tokenRecord.isRedeemed) {
-    return {
-      success: false,
-      message: 'Token ya ha sido utilizado',
-      redeemedAt: tokenRecord.redeemedAt
-    };
-  }
-
-  if (tokenRecord.expiresAt && new Date() > tokenRecord.expiresAt) {
-    return { success: false, message: 'Token expirado' };
-  }
-
-  const redeemedAt = new Date();
-  tokenRecord.isRedeemed = true;
-  tokenRecord.redeemedAt = redeemedAt;
-  tokenRecord.machineId = machineId;
-  tokenRecord.redemptionDetails = {
-    ip: clientInfo.ip,
-    deviceInfo: clientInfo.deviceInfo || 'No proporcionado',
-    timestamp: redeemedAt
-  };
-
-  tokenRecord.expiresAt = new Date(redeemedAt.getTime() + 30 * 24 * 60 * 60 * 1000);
-  await tokenRecord.save();
-
-  return {
-    success: true,
-    message: 'Token validado y activado correctamente',
-    expiresAt: tokenRecord.expiresAt
-  };
-};
-
 const calculateRemainingDays = (expiresAt) => {
   const now = new Date();
   const expDate = new Date(expiresAt);
@@ -244,4 +205,49 @@ exports.validateAndRedeemToken = async (token, machineId, clientInfo) => {
     message: 'Token validado y activado correctamente',
     expiresAt: tokenRecord.expiresAt
   };
+};
+
+// Obtener tokens expirados
+exports.getExpiredTokens = async () => {
+  const now = new Date();
+  return await Token.find({
+    expiresAt: { $lt: now }
+  }).sort({ expiresAt: 1 });
+};
+
+// Función auxiliar para añadir meses a una fecha manteniendo el día
+exports.addMonthsToDate = (date, months) => {
+  const newDate = new Date(date);
+  const currentMonth = newDate.getMonth();
+  const targetMonth = currentMonth + months;
+  
+  newDate.setMonth(targetMonth);
+  return newDate;
+};
+
+// Renovar token por meses
+exports.renewToken = async (tokenId, months) => {
+  const token = await Token.findOne({ token: tokenId });
+  if (!token) {
+    throw new Error('Token no encontrado');
+  }
+
+  const now = new Date();
+  let baseDate;
+
+  // Determinar la fecha base para la renovación
+  if (token.expiresAt > now) {
+    // Si el token aún no ha expirado, usar su fecha de expiración como base
+    baseDate = token.expiresAt;
+  } else {
+    // Si el token ya expiró, usar la fecha actual como base
+    baseDate = now;
+  }
+
+  // Añadir los meses a la fecha base
+  const newExpiryDate = this.addMonthsToDate(baseDate, months);
+  token.expiresAt = newExpiryDate;
+  await token.save();
+  
+  return token;
 };

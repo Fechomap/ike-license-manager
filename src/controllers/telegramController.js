@@ -61,11 +61,12 @@ class TelegramController {
     return {
       chatId: msg.chat.id,
       message: `
-Comandos disponibles:
-/ping - Verifica si el bot está activo
-/generar_token email nombre telefono - Genera un nuevo token
-/tokens_caducando [días] - Muestra tokens que caducarán en los próximos días
-/help - Muestra este mensaje de ayuda
+'🔍 Comandos disponibles:\n\n' +
+'🎯 /generar_token - Genera un nuevo token\n' +
+'📋 /listar_tokens - Muestra todos los tokens\n' +
+'⚠️ /tokens_caducando - Lista tokens próximos a vencer\n' +
+'❌ /tokens_expirados - Lista tokens expirados\n' +
+'❓ /help - Muestra este mensaje'
       `.trim()
     };
   }

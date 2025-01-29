@@ -73,6 +73,120 @@ class TelegramService {
       }
     });
 
+    // Comando para tokens expirados
+    this.bot.onText(/\/tokens_expirados/, async (msg) => {
+      try {
+        const tokens = await tokenService.getExpiredTokens();
+        
+        if (tokens.length === 0) {
+          await this.bot.sendMessage(msg.chat.id, '✨ No hay tokens expirados en este momento.');
+          return;
+        }
+
+        await this.bot.sendMessage(msg.chat.id, `📋 Encontrados ${tokens.length} tokens expirados. Procesando lista...`);
+
+        for (const token of tokens) {
+          const message = 
+            `🔑 Token: ${token.token}\n` +
+            `👤 Usuario: ${token.name}\n` +
+            `📧 Email: ${token.email}\n` +
+            `📱 Teléfono: ${token.phone}\n` +
+            `📅 Fecha de expiración: ${token.expiresAt.toLocaleDateString('es-MX', {
+              day: '2-digit',
+              month: '2-digit',
+              year: 'numeric'
+            })}\n` +
+            `${token.isRedeemed ? '✅ Token redimido' : '❌ Token no redimido'}`;
+
+          const inlineKeyboard = {
+            inline_keyboard: [
+              [
+                {
+                  text: '🔄 Renovar',
+                  callback_data: `renew:${token.token}`
+                },
+                {
+                  text: '🗑️ Borrar',
+                  callback_data: `delete:${token.token}`
+                }
+              ]
+            ]
+          };
+
+          await this.bot.sendMessage(msg.chat.id, message, {
+            reply_markup: inlineKeyboard
+          });
+
+          await this.sleep(500);
+        }
+
+        await this.bot.sendMessage(msg.chat.id, '✅ Lista de tokens expirados completada');
+      } catch (error) {
+        console.error('Error al listar tokens expirados:', error);
+        await this.bot.sendMessage(msg.chat.id, '❌ Error al obtener la lista de tokens expirados');
+      }
+    });
+
+    // Manejador de callbacks para los botones
+    this.bot.on('callback_query', async (callbackQuery) => {
+      const [action, tokenId, months] = callbackQuery.data.split(':');
+      const chatId = callbackQuery.message.chat.id;
+      const messageId = callbackQuery.message.message_id;
+
+      try {
+        switch (action) {
+          case 'renew':
+            // Mostrar opciones de renovación por meses
+            await this.bot.editMessageReplyMarkup({
+              inline_keyboard: [
+                [
+                  { text: '1 Mes', callback_data: `extend:${tokenId}:1` },
+                  { text: '2 Meses', callback_data: `extend:${tokenId}:2` },
+                  { text: '3 Meses', callback_data: `extend:${tokenId}:3` }
+                ]
+              ]
+            }, {
+              chat_id: chatId,
+              message_id: messageId
+            });
+            break;
+
+          case 'extend':
+            const updatedToken = await tokenService.renewToken(tokenId, parseInt(months));
+            
+            const newExpiryDate = updatedToken.expiresAt.toLocaleDateString('es-MX', {
+              day: '2-digit',
+              month: '2-digit',
+              year: 'numeric'
+            });
+
+            await this.bot.editMessageText(
+              `✅ Token renovado por ${months} ${months === '1' ? 'mes' : 'meses'}.\n` +
+              `Nueva fecha de expiración: ${newExpiryDate}`,
+              {
+                chat_id: chatId,
+                message_id: messageId
+              }
+            );
+            break;
+
+          case 'delete':
+            await Token.deleteOne({ token: tokenId });
+            await this.bot.editMessageText(
+              '🗑️ Token eliminado permanentemente.',
+              {
+                chat_id: chatId,
+                message_id: messageId
+              }
+            );
+            break;
+        }
+      } catch (error) {
+        console.error('Error en callback handler:', error);
+        await this.bot.sendMessage(chatId, '❌ Error al procesar la acción');
+      }
+    });    
+
     this.bot.on('message', (msg) => this.handleMessage(msg));
   }
 
@@ -96,6 +210,7 @@ class TelegramService {
       '🎯 /generar_token - Genera un nuevo token\n' +
       '📋 /listar_tokens - Muestra todos los tokens\n' +
       '⚠️ /tokens_caducando - Lista tokens próximos a vencer\n' +
+      '❌ /tokens_expirados - Lista tokens expirados\n' +
       '❓ /help - Muestra este mensaje'
     );
   }
