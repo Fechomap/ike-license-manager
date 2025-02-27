@@ -19,32 +19,41 @@ class TelegramService {
     // Comando para listar tokens
     this.bot.onText(/\/listar_tokens/, async (msg) => {
       try {
+        // Notificamos que estamos procesando
+        await this.bot.sendMessage(msg.chat.id, '⏳ Obteniendo lista de tokens...');
+        
+        // Obtenemos los tokens
         const tokens = await tokenService.getAllTokens();
-
-        if (tokens.length === 0) {
+        
+        if (!tokens || tokens.length === 0) {
           await this.bot.sendMessage(msg.chat.id, '📋 No hay tokens para mostrar.');
           return;
         }
-
-        // Enviar encabezado
-        await this.bot.sendMessage(msg.chat.id, '📋 Lista de tokens:\n');
-
-        // Iterar sobre cada token y enviarlo individualmente con un retraso
+    
+        await this.bot.sendMessage(msg.chat.id, `📋 Encontrados ${tokens.length} tokens. Procesando lista...`);
+        
         for (const token of tokens) {
+          if (!token || !token.token) continue;
+          
           const status = token.isRedeemed ? '✅ Canjeado' : '⏳ No canjeado';
+          const days = token.remainingDays || 0;
+          
+          // SIN formato Markdown - texto plano
           const tokenMessage = 
-            `🔑 *Token:* ${token.token}\n` +
-            `👤 *Usuario:* ${token.name}\n` +
-            `📧 *Email:* ${token.email}\n` +
-            `📅 *Estado:* ${status}\n` +
-            `⏰ *Días restantes:* ${token.remainingDays}`;
-
-          await this.bot.sendMessage(msg.chat.id, tokenMessage, { parse_mode: 'Markdown' });
-
-          // Retraso de 500 milisegundos
-          await this.sleep(500);
+            `🔑 Token: ${token.token}\n` +
+            `👤 Usuario: ${token.name || 'N/A'}\n` +
+            `📧 Email: ${token.email || 'N/A'}\n` +
+            `📅 Estado: ${status}\n` +
+            `⏰ Días restantes: ${days}`;
+    
+          await this.bot.sendMessage(msg.chat.id, tokenMessage);
+          
+          // Pequeña pausa entre mensajes
+          await this.sleep(300);
         }
-
+        
+        await this.bot.sendMessage(msg.chat.id, '✅ Lista completada');
+        
       } catch (error) {
         console.error('Error al listar tokens:', error);
         await this.bot.sendMessage(msg.chat.id, '❌ Error al obtener la lista de tokens');
