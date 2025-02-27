@@ -24,6 +24,7 @@ async function importTokens() {
 
         const results = {
             total: data.length,
+            created: 0,
             updated: 0,
             errors: []
         };
@@ -63,35 +64,106 @@ async function importTokens() {
 
         for (const row of data) {
             try {
-                // Verificar que el token existe
+                // Verificar que el token existe en el archivo Excel
                 if (!row.Token) {
+                    results.errors.push('Encontrada fila sin token');
                     continue;
                 }
 
-                let expiresAt;
+                // Parsear las fechas
+                let createdAt, expiresAt, redeemedAt;
                 try {
-                    expiresAt = parseDate(row.Fecha_Expiración);
-                    if (!expiresAt || isNaN(expiresAt.getTime())) {
-                        throw new Error(`Fecha inválida: ${row.Fecha_Expiración}`);
+                    if (row.Fecha_Creación) {
+                        createdAt = parseDate(row.Fecha_Creación);
+                    } else {
+                        // Si no hay fecha de creación, usar la actual
+                        createdAt = new Date();
+                    }
+                    
+                    if (row.Fecha_Expiración) {
+                        expiresAt = parseDate(row.Fecha_Expiración);
+                    } else {
+                        // Si no hay fecha de expiración, crear una por defecto (90 días)
+                        expiresAt = new Date(createdAt.getTime() + 90 * 24 * 60 * 60 * 1000);
+                    }
+                    
+                    if (row.Fecha_Canje) {
+                        redeemedAt = parseDate(row.Fecha_Canje);
+                    }
+                    
+                    // Verificar que las fechas son válidas
+                    if ((createdAt && isNaN(createdAt.getTime())) || 
+                        (expiresAt && isNaN(expiresAt.getTime())) || 
+                        (redeemedAt && isNaN(redeemedAt.getTime()))) {
+                        throw new Error('Una o más fechas no son válidas');
                     }
                 } catch (error) {
-                    results.errors.push(`Error en fecha para token ${row.Token}: ${error.message}`);
+                    results.errors.push(`Error en fechas para token ${row.Token}: ${error.message}`);
                     continue;
                 }
 
-                // Actualizar solo la fecha de expiración
-                const result = await Token.updateOne(
-                    { token: row.Token },
-                    { 
-                        $set: { 
-                            expiresAt: expiresAt
-                        }
+                // Buscar si el token ya existe
+                const existingToken = await Token.findOne({ token: row.Token });
+                
+                if (existingToken) {
+                    // Actualizar token existente
+                    const updateFields = {
+                        expiresAt: expiresAt
+                    };
+                    
+                    // Sólo actualizar campos que existen en el Excel
+                    if (row.Email) updateFields.email = row.Email;
+                    if (row.Nombre) updateFields.name = row.Nombre;
+                    if (row.Teléfono) updateFields.phone = row.Teléfono;
+                    if (redeemedAt) updateFields.redeemedAt = redeemedAt;
+                    if (row.Estado === 'Canjeado') updateFields.isRedeemed = true;
+                    if (row.ID_Máquina) updateFields.machineId = row.ID_Máquina;
+                    if (row.Dispositivo_Redención || row.IP_Redención) {
+                        updateFields.redemptionDetails = {
+                            ...(existingToken.redemptionDetails || {}),
+                            ...(row.IP_Redención ? { ip: row.IP_Redención } : {}),
+                            ...(row.Dispositivo_Redención ? { deviceInfo: row.Dispositivo_Redención } : {}),
+                            ...(redeemedAt ? { timestamp: redeemedAt } : {})
+                        };
                     }
-                );
-
-                if (result.modifiedCount > 0) {
+                    
+                    await Token.updateOne(
+                        { token: row.Token },
+                        { $set: updateFields }
+                    );
+                    
                     results.updated++;
                     console.log(`✅ Actualizado token: ${row.Token}`);
+                } else {
+                    // Crear un nuevo token
+                    const tokenData = {
+                        token: row.Token,
+                        email: row.Email || 'no-email@example.com',
+                        name: row.Nombre || 'Usuario',
+                        phone: row.Teléfono || '0000000000',
+                        createdAt: createdAt,
+                        expiresAt: expiresAt,
+                        isRedeemed: row.Estado === 'Canjeado',
+                        redeemedAt: redeemedAt
+                    };
+                    
+                    if (row.ID_Máquina) {
+                        tokenData.machineId = row.ID_Máquina;
+                    }
+                    
+                    if (row.Dispositivo_Redención || row.IP_Redención) {
+                        tokenData.redemptionDetails = {
+                            ip: row.IP_Redención || '',
+                            deviceInfo: row.Dispositivo_Redención || '',
+                            timestamp: redeemedAt || new Date()
+                        };
+                    }
+                    
+                    const newToken = new Token(tokenData);
+                    await newToken.save();
+                    
+                    results.created++;
+                    console.log(`🆕 Creado nuevo token: ${row.Token}`);
                 }
             } catch (error) {
                 results.errors.push(`Error procesando token ${row.Token}: ${error.message}`);
@@ -100,6 +172,7 @@ async function importTokens() {
 
         console.log('\n📊 Resultados de la importación:');
         console.log(`Total de registros: ${results.total}`);
+        console.log(`Tokens creados: ${results.created}`);
         console.log(`Tokens actualizados: ${results.updated}`);
         
         if (results.errors.length > 0) {
@@ -113,6 +186,9 @@ async function importTokens() {
         process.exit(0);
     } catch (error) {
         console.error('❌ Error en la importación:', error);
+        if (mongoose.connection.readyState === 1) {
+            await mongoose.connection.close();
+        }
         process.exit(1);
     }
 }
