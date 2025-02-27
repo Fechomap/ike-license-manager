@@ -1,30 +1,36 @@
-# IKE License Manager - API Documentation
+# IKE License Manager - Documentación de API
 
-## Overview
+## Descripción General
 
-IKE License Manager is a robust software licensing system that provides token generation, validation, and management capabilities through a REST API. This documentation provides detailed information about available endpoints, request/response formats, and integration examples.
+IKE License Manager es un sistema robusto de gestión de licencias de software que proporciona capacidades de generación, validación y administración de tokens a través de una API REST. Esta documentación proporciona información detallada sobre los endpoints disponibles, formatos de solicitud/respuesta y ejemplos de integración.
 
-## Base URL
+## URL Base
 
 ```
 https://ike-license-manager-9b796c40a448.herokuapp.com/api
 ```
 
-## Authentication
+## Autenticación
 
-Currently, the API does not require authentication. However, implementing API keys or JWT authentication is recommended for production use.
+Actualmente, la API no requiere autenticación. La implementación planificada incluirá:
+
+- **Autenticación por API Key**: Para comunicaciones servidor a servidor
+- **Autenticación JWT**: Para control de acceso basado en usuarios a endpoints de administración
+
+Hasta que se implemente la autenticación, se recomienda tener precaución con los endpoints que modifican datos y considerar la implementación de restricciones de IP a nivel de red.
 
 ## Endpoints
 
-### 1. Check API Status
+### 1. Verificar Estado de la API
 
-Verifies if the API is active and functioning correctly.
+Verifica si la API está activa y funcionando correctamente.
 
-**Request**
-- Method: `GET`
+**Solicitud**
+- Método: `GET`
 - Endpoint: `/status`
 
-**Response**
+**Respuesta**
+- Código de Estado: `200 OK`
 
 ```json
 {
@@ -32,36 +38,37 @@ Verifies if the API is active and functioning correctly.
 }
 ```
 
-### 2. Validate and Activate Token
+### 2. Validar y Activar Token
 
-Validates a token and activates it by linking it to a specific device.
+Valida un token y lo activa vinculándolo a un dispositivo específico.
 
-**Request**
-- Method: `POST`
+**Solicitud**
+- Método: `POST`
 - Endpoint: `/validate`
 - Content-Type: `application/json`
 
-**Request Body**
+**Cuerpo de la Solicitud**
 ```json
 {
   "token": "ad1c6c6f6f881d8637306efa48922ff4",
   "machineId": "machine-12345",
-  "deviceInfo": "iPhone 14 Pro, iOS 17"  // Optional
+  "deviceInfo": "iPhone 14 Pro, iOS 17"  // Opcional
 }
 ```
 
-**Successful Response** (200 OK)
+**Respuesta Exitosa** (200 OK)
 ```json
 {
   "success": true,
   "message": "Token validado y activado correctamente",
-  "expiresAt": "2025-02-19T14:42:55.275Z"
+  "expiresAt": "2025-02-19T14:42:55.275Z",
+  "daysRemaining": 30
 }
 ```
 
-**Error Responses**
+**Respuestas de Error**
 
-Missing Parameters (400 Bad Request)
+Parámetros Faltantes (400 Bad Request)
 ```json
 {
   "success": false,
@@ -69,7 +76,7 @@ Missing Parameters (400 Bad Request)
 }
 ```
 
-Token Not Found (404 Not Found)
+Token No Encontrado (404 Not Found)
 ```json
 {
   "success": false,
@@ -77,108 +84,216 @@ Token Not Found (404 Not Found)
 }
 ```
 
-Already Redeemed Token (400 Bad Request)
+Token Ya Canjeado (400 Bad Request)
 ```json
 {
   "success": false,
-  "message": "Token ya canjeado"
+  "message": "Token ya ha sido utilizado",
+  "redeemedAt": "2023-12-15T10:30:00.000Z"
 }
 ```
 
-### 3. List All Tokens
-
-Retrieves a list of all registered tokens and their current status.
-
-**Request**
-- Method: `GET`
-- Endpoint: `/tokens`
-
-**Response**
+Token Expirado (400 Bad Request)
 ```json
 {
-  "success": true,
-  "data": [
+  "success": false,
+  "message": "Token expirado"
+}
+```
+
+Error del Servidor (500 Internal Server Error)
+```json
+{
+  "success": false,
+  "message": "Error al validar el token",
+  "error": "Detalles del mensaje de error" // Solo en entornos de desarrollo
+}
+```
+
+### 3. Listar Todos los Tokens
+
+Recupera una lista de todos los tokens registrados y su estado actual.
+
+**Solicitud**
+- Método: `GET`
+- Endpoint: `/tokens`
+- Parámetros de Consulta:
+  - `page`: Número de página (predeterminado: 1)
+  - `limit`: Elementos por página (predeterminado: 5, máximo: 100)
+
+**Respuesta** (200 OK)
+```json
+{
+  "tokens": [
     {
       "token": "ad1c6c6f6f881d8637306efa48922ff4",
-      "status": "redeemed",
+      "email": "usuario@ejemplo.com",
+      "name": "Juan Pérez",
+      "phone": "+1234567890",
+      "createdAt": "2023-11-15T10:30:00.000Z",
+      "expiresAt": "2024-02-15T10:30:00.000Z",
+      "isRedeemed": true,
+      "redeemedAt": "2023-11-16T14:22:00.000Z",
       "machineId": "machine-12345",
-      "deviceInfo": "iPhone 14 Pro, iOS 17"
+      "redemptionDetails": {
+        "ip": "192.168.1.10",
+        "deviceInfo": "iPhone 14 Pro, iOS 17",
+        "timestamp": "2023-11-16T14:22:00.000Z"
+      },
+      "daysRemaining": 30
     },
     {
       "token": "ad59e4c476e47ed21180e0d540564b7c",
-      "status": "unredeemed",
-      "machineId": null,
-      "deviceInfo": null
+      "email": "otro@ejemplo.com",
+      "name": "María García",
+      "phone": "+9876543210",
+      "createdAt": "2023-12-01T09:15:00.000Z",
+      "expiresAt": "2024-03-01T09:15:00.000Z",
+      "isRedeemed": false,
+      "daysRemaining": 60
     }
-  ]
+  ],
+  "currentPage": 1,
+  "totalPages": 5,
+  "totalTokens": 25
 }
 ```
 
-## Integration Examples
+**Respuesta de Error** (500 Internal Server Error)
+```json
+{
+  "success": false,
+  "message": "Error al obtener tokens"
+}
+```
 
-### JavaScript (Node.js with Axios)
+### 4. Verificar Validez del Token
+
+Verifica si un token es válido sin canjearlo.
+
+**Solicitud**
+- Método: `GET`
+- Endpoint: `/check-validity/:token`
+
+**Respuesta Exitosa** (200 OK)
+```json
+{
+  "isActive": true
+}
+```
+
+**Respuesta de Token Inválido o Error** (200 OK con resultado falso)
+```json
+{
+  "isActive": false
+}
+```
+
+## Ejemplos de Integración
+
+### Ejemplos con cURL
+
+#### Verificar Estado de la API
+```bash
+curl -X GET https://ike-license-manager-9b796c40a448.herokuapp.com/api/status
+```
+
+#### Validar Token
+```bash
+curl -X POST https://ike-license-manager-9b796c40a448.herokuapp.com/api/validate \
+  -H "Content-Type: application/json" \
+  -d '{"token": "ad1c6c6f6f881d8637306efa48922ff4", "machineId": "machine-12345", "deviceInfo": "MacBook Pro, macOS 12.5"}'
+```
+
+#### Listar Tokens
+```bash
+curl -X GET https://ike-license-manager-9b796c40a448.herokuapp.com/api/tokens
+```
+
+#### Verificar Validez del Token
+```bash
+curl -X GET https://ike-license-manager-9b796c40a448.herokuapp.com/api/check-validity/ad1c6c6f6f881d8637306efa48922ff4
+```
+
+### JavaScript (Node.js con Axios)
 
 ```javascript
 const axios = require('axios');
 
 const API_BASE_URL = 'https://ike-license-manager-9b796c40a448.herokuapp.com/api';
 
-// Check API Status
-async function checkApiStatus() {
+// Verificar Estado de la API
+async function verificarEstadoAPI() {
   try {
     const response = await axios.get(`${API_BASE_URL}/status`);
-    console.log('API Status:', response.data);
+    console.log('Estado de la API:', response.data);
+    return response.data;
   } catch (error) {
-    console.error('Error checking API status:', error.response?.data || error.message);
+    console.error('Error al verificar estado de la API:', error.response?.data || error.message);
+    throw error;
   }
 }
 
-// Validate Token
-async function validateToken(token, machineId, deviceInfo) {
+// Validar Token
+async function validarToken(token, machineId, deviceInfo) {
   try {
     const response = await axios.post(`${API_BASE_URL}/validate`, {
       token,
       machineId,
       deviceInfo
     });
-    console.log('Token validation result:', response.data);
+    console.log('Resultado de validación del token:', response.data);
     return response.data;
   } catch (error) {
-    console.error('Token validation error:', error.response?.data || error.message);
+    console.error('Error de validación del token:', error.response?.data || error.message);
     throw error;
   }
 }
 
-// List All Tokens
-async function listTokens() {
+// Listar Todos los Tokens (con paginación)
+async function listarTokens(page = 1) {
   try {
-    const response = await axios.get(`${API_BASE_URL}/tokens`);
-    console.log('Token list:', response.data);
+    const response = await axios.get(`${API_BASE_URL}/tokens`, {
+      params: { page }
+    });
+    console.log('Lista de tokens:', response.data);
     return response.data;
   } catch (error) {
-    console.error('Error listing tokens:', error.response?.data || error.message);
+    console.error('Error al listar tokens:', error.response?.data || error.message);
     throw error;
+  }
+}
+
+// Verificar validez del token sin canjearlo
+async function verificarValidezToken(token) {
+  try {
+    const response = await axios.get(`${API_BASE_URL}/check-validity/${token}`);
+    console.log('Validez del token:', response.data);
+    return response.data.isActive;
+  } catch (error) {
+    console.error('Error al verificar validez del token:', error.response?.data || error.message);
+    return false;
   }
 }
 ```
 
-### Python (with requests)
+### Python (con requests)
 
 ```python
 import requests
 
 API_BASE_URL = 'https://ike-license-manager-9b796c40a448.herokuapp.com/api'
 
-def check_api_status():
+def verificar_estado_api():
     try:
         response = requests.get(f'{API_BASE_URL}/status')
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
-        print(f'Error checking API status: {e}')
+        print(f'Error al verificar estado de la API: {e}')
         return None
 
-def validate_token(token, machine_id, device_info=None):
+def validar_token(token, machine_id, device_info=None):
     try:
         payload = {
             'token': token,
@@ -189,59 +304,101 @@ def validate_token(token, machine_id, device_info=None):
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
-        print(f'Error validating token: {e}')
+        print(f'Error al validar token: {e}')
         return None
 
-def list_tokens():
+def listar_tokens(pagina=1):
     try:
-        response = requests.get(f'{API_BASE_URL}/tokens')
+        params = {'page': pagina}
+        response = requests.get(f'{API_BASE_URL}/tokens', params=params)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
-        print(f'Error listing tokens: {e}')
+        print(f'Error al listar tokens: {e}')
         return None
+
+def verificar_validez_token(token):
+    try:
+        response = requests.get(f'{API_BASE_URL}/check-validity/{token}')
+        response.raise_for_status()
+        return response.json().get('isActive', False)
+    except requests.exceptions.RequestException as e:
+        print(f'Error al verificar validez del token: {e}')
+        return False
 ```
 
-## Best Practices
+## Mejores Prácticas
 
-1. **Error Handling**
-   - Always implement proper error handling in your client applications
-   - Check for HTTP status codes and handle them appropriately
-   - Parse response data carefully to handle unexpected formats
+1. **Manejo de Errores**
+   - Implementar siempre un manejo adecuado de errores en tus aplicaciones cliente
+   - Verificar los códigos de estado HTTP y manejarlos apropiadamente
+   - Analizar los datos de respuesta cuidadosamente para manejar formatos inesperados
+   - Implementar lógica de reintento para errores de red transitorios
 
-2. **Security Considerations**
-   - Store sensitive data (tokens, machine IDs) securely
-   - Implement SSL/TLS for all API communications
-   - Consider implementing rate limiting in your client applications
+2. **Consideraciones de Seguridad**
+   - Almacenar datos sensibles (tokens, IDs de máquina) de forma segura
+   - Implementar SSL/TLS para todas las comunicaciones con la API
+   - Considerar la implementación de limitación de tasa en tus aplicaciones cliente
+   - No codificar tokens directamente en el código de tu aplicación
 
-3. **Performance**
-   - Implement caching where appropriate
-   - Handle network timeouts gracefully
-   - Consider implementing retry logic for failed requests
+3. **Rendimiento**
+   - Implementar caché donde sea apropiado
+   - Manejar tiempos de espera de red elegantemente
+   - Utilizar los parámetros de paginación para listar tokens y evitar cargas grandes
 
-## Data Model
+4. **Gestión de Tokens**
+   - Almacenar el machineId de forma segura en el dispositivo cliente
+   - Implementar mensajes de error apropiados para los usuarios cuando la validación del token falla
+   - Considerar la implementación de un flujo de renovación antes de que los tokens expiren
 
-The token model includes the following fields:
+## Límites y Restricciones
+
+- Límite de tasa de API: 100 solicitudes por minuto por dirección IP
+- Tamaño máximo de carga útil de solicitud: 1MB
+- Los listados de tokens están paginados con un valor predeterminado de 5 elementos por página y un máximo de 100
+
+## Modelo de Datos
+
+El modelo de token incluye los siguientes campos:
 
 ```javascript
 {
-  token: String,          // Unique token identifier
-  email: String,          // User's email
-  name: String,           // User's name
-  phone: String,          // User's phone number
-  createdAt: Date,        // Token creation date
-  expiresAt: Date,        // Token expiration date
-  isRedeemed: Boolean,    // Redemption status
-  redeemedAt: Date,       // Redemption date
-  machineId: String,      // Linked machine identifier
+  token: String,          // Identificador único del token
+  email: String,          // Correo electrónico del usuario
+  name: String,           // Nombre del usuario
+  phone: String,          // Número de teléfono del usuario
+  createdAt: Date,        // Fecha de creación del token
+  expiresAt: Date,        // Fecha de expiración del token
+  isRedeemed: Boolean,    // Estado de canje
+  redeemedAt: Date,       // Fecha de canje
+  machineId: String,      // Identificador único de la máquina
   redemptionDetails: {
-    ip: String,           // IP address used for redemption
-    deviceInfo: String,   // Device information
-    timestamp: Date       // Redemption timestamp
-  }
+    ip: String,           // Dirección IP utilizada para el canje
+    deviceInfo: String,   // Información del dispositivo
+    timestamp: Date       // Marca de tiempo del canje
+  },
+  daysRemaining: Number   // Campo calculado: días hasta la expiración
 }
 ```
 
-## Support
+## Versionado de API
 
-For additional support or to report issues, please contact the development team or refer to the project documentation in the repository.
+Esta documentación cubre la v1 de la API. Los cambios futuros serán versionados utilizando versionado basado en ruta (por ejemplo, `/api/v2/...`).
+
+## Soporte
+
+Para soporte adicional o para reportar problemas:
+- Abrir un issue en el repositorio del proyecto
+- Contactar al equipo de desarrollo a través de [correo de soporte]
+- Consultar la documentación del proyecto en el repositorio
+
+## Registro de Cambios
+
+**v1.0.0 (27/02/2024)**
+- Lanzamiento inicial con validación, listado y verificación de estado de tokens
+- Implementación de canje de tokens con vinculación a máquina
+
+**Características Planificadas**
+- Autenticación de usuario para endpoints de gestión de tokens
+- API de generación de tokens por lotes
+- Informes y análisis mejorados
