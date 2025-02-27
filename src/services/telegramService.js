@@ -2,6 +2,7 @@
 const TelegramBot = require('node-telegram-bot-api');
 const tokenService = require('./tokenService');
 const config = require('../config/config');
+const Token = require('../models/tokenModel');
 
 class TelegramService {
   constructor() {
