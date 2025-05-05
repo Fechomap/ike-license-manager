@@ -6,7 +6,7 @@ module.exports = {
   mongodbURI: process.env.MONGODB_URI,
   telegramToken: process.env.TELEGRAM_TOKEN,
   jwtSecret: process.env.JWT_SECRET,
-  emailUser: process.env.EMAIL_USER,
-  emailPassword: process.env.EMAIL_PASSWORD,
   adminChatId: process.env.ADMIN_CHAT_ID,
+  isProduction: process.env.NODE_ENV === 'production' || !!process.env.RAILWAY_ENVIRONMENT_NAME,
+  railwayPublicDomain: process.env.RAILWAY_PUBLIC_DOMAIN,
 };

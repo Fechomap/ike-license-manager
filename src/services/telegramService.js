@@ -6,9 +6,31 @@ const Token = require('../models/tokenModel');
 
 class TelegramService {
   constructor() {
-    this.bot = new TelegramBot(config.telegramToken, { polling: true });
+    if (config.isProduction) {
+      // Modo Webhook para Railway
+      this.bot = new TelegramBot(config.telegramToken);
+      this.setupWebhook();
+    } else {
+      // Modo Polling para desarrollo local
+      this.bot = new TelegramBot(config.telegramToken, { polling: true });
+    }
     this.userStates = new Map();
     this.initializeCommands();
+  }
+
+  async setupWebhook() {
+    if (!config.railwayPublicDomain) {
+      console.error('❌ RAILWAY_PUBLIC_DOMAIN no está definido');
+      return;
+    }
+    
+    const url = `https://${config.railwayPublicDomain}/api/telegram-webhook`;
+    try {
+      await this.bot.setWebHook(url);
+      console.log(`✅ Webhook configurado en: ${url}`);
+    } catch (error) {
+      console.error('❌ Error al configurar webhook:', error);
+    }
   }
 
   initializeCommands() {
