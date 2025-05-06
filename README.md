@@ -18,6 +18,7 @@ Sistema de gestión de licencias con bot de Telegram y API REST para la validaci
 - MongoDB
 - Token de Bot de Telegram
 - Variables de entorno configuradas
+- Cuenta en Railway (para deployment)
 
 ## Instalación
 
@@ -44,11 +45,39 @@ MONGODB_URI=mongodb://localhost/ike-license
 TELEGRAM_TOKEN=your_telegram_bot_token
 JWT_SECRET=your_jwt_secret
 ADMIN_CHAT_ID=your_admin_chat_id
+NODE_ENV=production # Para entorno Railway
+RAILWAY_ENVIRONMENT_NAME=production # Configuración de Railway
+RAILWAY_PUBLIC_DOMAIN=tu-dominio.railway.app # Solo para Railway
 ```
+
+## Deployment en Railway
+
+### Configuración inicial
+
+1. Conecta tu repositorio a Railway
+2. Configura las variables de entorno:
+   - `MONGODB_URI`: Tu cadena de conexión a MongoDB
+   - `TELEGRAM_TOKEN`: Token de tu bot de Telegram
+   - `JWT_SECRET`: Clave secreta para JWT
+   - `ADMIN_CHAT_ID`: ID del chat de administración
+   - `NODE_ENV`: production
+
+3. Railway generará automáticamente:
+   - `RAILWAY_PUBLIC_DOMAIN`: Dominio público de tu aplicación
+   - `RAILWAY_ENVIRONMENT_NAME`: Nombre del entorno
+
+### Verificación del deployment
+
+1. Verifica que la aplicación se despliega correctamente:
+```bash
+curl https://tu-dominio.railway.app/api/status
+```
+
+2. Configura el webhook del bot de Telegram (se hace automáticamente al iniciar)
 
 ## Uso
 
-### Iniciar el Servidor
+### Iniciar el Servidor Local
 
 ```bash
 npm start
@@ -61,13 +90,13 @@ npm start
 - `/generar_token` - Generar nuevo token
 - `/listar_tokens` - Listar tokens existentes
 - `/tokens_caducando` - Mostrar tokens próximos a expirar
-- `/exportar_tokens` - Exportar lista a Excel
+- `/tokens_expirados` - Listar tokens expirados
 
 ### API Endpoints
 
 #### Base URL
 ```
-https://ike-license-manager-9b796c40a448.herokuapp.com/api
+https://tu-dominio.railway.app/api
 ```
 
 #### Endpoints Principales
@@ -161,7 +190,7 @@ IKE-LICENSE-MANAGER/
 
 ### Seguridad
 - Implementar rate limiting en producción
-- Usar HTTPS para todas las comunicaciones
+- Usar HTTPS para todas las comunicaciones (Railway lo proporciona automáticamente)
 - Proteger endpoints sensibles con autenticación
 - Almacenar tokens y datos sensibles de forma segura
 
@@ -179,17 +208,55 @@ Los logs del sistema incluyen:
 - Errores de sistema
 - Actividad del bot de Telegram
 
+### Acceso a logs en Railway
+```bash
+# Ver logs en Railway
+railway logs
+```
+
 ### Backups
 Se recomienda:
 - Realizar backups diarios de la base de datos
 - Exportar regularmente la base de datos usando el script de exportación
 - Mantener copias de seguridad en múltiples ubicaciones
 
+## Configuración de Railway
+
+### Variables de Entorno Requeridas
+```
+MONGODB_URI=mongodb+srv://...
+TELEGRAM_TOKEN=123456789:ABC-...
+JWT_SECRET=tu_clave_secreta
+ADMIN_CHAT_ID=123456789
+NODE_ENV=production
+```
+
+### Dominio Personalizado
+
+Railway permite configurar dominios personalizados:
+1. Ir a Settings > Networking
+2. Agregar tu dominio personalizado
+3. Configurar los registros DNS según las instrucciones
+
+## Troubleshooting
+
+### Problemas comunes en Railway
+
+1. **Bot no responde**: Verifica que `RAILWAY_PUBLIC_DOMAIN` está configurado
+2. **Errores de conexión MongoDB**: Asegúrate que `MONGODB_URI` está correctamente configurado
+3. **Webhook no funciona**: Verifica que el servicio está corriendo en HTTPS
+
+### Verificar estado del servicio
+
+```bash
+curl https://tu-dominio.railway.app/api/status
+```
+
 ## Soporte
 
 Para soporte técnico o reportar problemas:
 1. Revisar la documentación en `/docs`
-2. Contactar al equipo de desarrollo
+2. Consultar los logs de Railway
 3. Abrir un issue en el repositorio
 
 ## Licencia

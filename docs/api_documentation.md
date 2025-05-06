@@ -2,13 +2,15 @@
 
 ## Descripción General
 
-IKE License Manager es un sistema robusto de gestión de licencias de software que proporciona capacidades de generación, validación y administración de tokens a través de una API REST. Esta documentación proporciona información detallada sobre los endpoints disponibles, formatos de solicitud/respuesta y ejemplos de integración.
+IKE License Manager es un sistema robusto de gestión de licencias de software que proporciona capacidades de generación, validación y administración de tokens a través de una API REST. Esta documentación proporciona información detallada sobre los endpoints disponibles, formatos de solicitud/respuesta y ejemplos de integración. La API está desplegada en Railway.
 
 ## URL Base
 
 ```
-https://ike-license-manager-9b796c40a448.herokuapp.com/api
+https://tu-dominio.railway.app/api
 ```
+
+*Nota: Reemplaza `tu-dominio.railway.app` con tu dominio real generado por Railway.*
 
 ## Autenticación
 
@@ -195,24 +197,24 @@ Verifica si un token es válido sin canjearlo.
 
 #### Verificar Estado de la API
 ```bash
-curl -X GET https://ike-license-manager-9b796c40a448.herokuapp.com/api/status
+curl -X GET https://tu-dominio.railway.app/api/status
 ```
 
 #### Validar Token
 ```bash
-curl -X POST https://ike-license-manager-9b796c40a448.herokuapp.com/api/validate \
+curl -X POST https://tu-dominio.railway.app/api/validate \
   -H "Content-Type: application/json" \
   -d '{"token": "ad1c6c6f6f881d8637306efa48922ff4", "machineId": "machine-12345", "deviceInfo": "MacBook Pro, macOS 12.5"}'
 ```
 
 #### Listar Tokens
 ```bash
-curl -X GET https://ike-license-manager-9b796c40a448.herokuapp.com/api/tokens
+curl -X GET https://tu-dominio.railway.app/api/tokens
 ```
 
 #### Verificar Validez del Token
 ```bash
-curl -X GET https://ike-license-manager-9b796c40a448.herokuapp.com/api/check-validity/ad1c6c6f6f881d8637306efa48922ff4
+curl -X GET https://tu-dominio.railway.app/api/check-validity/ad1c6c6f6f881d8637306efa48922ff4
 ```
 
 ### JavaScript (Node.js con Axios)
@@ -220,7 +222,7 @@ curl -X GET https://ike-license-manager-9b796c40a448.herokuapp.com/api/check-val
 ```javascript
 const axios = require('axios');
 
-const API_BASE_URL = 'https://ike-license-manager-9b796c40a448.herokuapp.com/api';
+const API_BASE_URL = 'https://tu-dominio.railway.app/api';
 
 // Verificar Estado de la API
 async function verificarEstadoAPI() {
@@ -282,7 +284,7 @@ async function verificarValidezToken(token) {
 ```python
 import requests
 
-API_BASE_URL = 'https://ike-license-manager-9b796c40a448.herokuapp.com/api'
+API_BASE_URL = 'https://tu-dominio.railway.app/api'
 
 def verificar_estado_api():
     try:
@@ -337,7 +339,7 @@ def verificar_validez_token(token):
 
 2. **Consideraciones de Seguridad**
    - Almacenar datos sensibles (tokens, IDs de máquina) de forma segura
-   - Implementar SSL/TLS para todas las comunicaciones con la API
+   - Implementar SSL/TLS para todas las comunicaciones con la API (Railway lo proporciona por defecto)
    - Considerar la implementación de limitación de tasa en tus aplicaciones cliente
    - No codificar tokens directamente en el código de tu aplicación
 
@@ -385,18 +387,37 @@ El modelo de token incluye los siguientes campos:
 
 Esta documentación cubre la v1 de la API. Los cambios futuros serán versionados utilizando versionado basado en ruta (por ejemplo, `/api/v2/...`).
 
+## Información de Railway
+
+### Características de Railway
+
+- **HTTPS automático**: Todos los endpoints están disponibles sobre HTTPS
+- **Escalabilidad automática**: El servicio se escala según la demanda
+- **Monitorización**: Railway proporciona métricas de rendimiento y logs
+- **Variables de entorno**: Gestión segura de configuración
+
+### Verificación de Salud
+
+Railway proporciona un endpoint de health check automático. Puedes verificar que tu instancia esté saludable:
+
+```bash
+curl https://tu-dominio.railway.app/health
+```
+
 ## Soporte
 
 Para soporte adicional o para reportar problemas:
 - Abrir un issue en el repositorio del proyecto
 - Contactar al equipo de desarrollo a través de [correo de soporte]
 - Consultar la documentación del proyecto en el repositorio
+- Revisar los logs de Railway para diagnóstico
 
 ## Registro de Cambios
 
 **v1.0.0 (27/02/2024)**
 - Lanzamiento inicial con validación, listado y verificación de estado de tokens
 - Implementación de canje de tokens con vinculación a máquina
+- Migración de Heroku a Railway
 
 **Características Planificadas**
 - Autenticación de usuario para endpoints de gestión de tokens
