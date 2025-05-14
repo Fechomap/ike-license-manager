@@ -258,7 +258,7 @@ Para soporte técnico o reportar problemas:
 1. Revisar la documentación en `/docs`
 2. Consultar los logs de Railway
 3. Abrir un issue en el repositorio
-
+    
 ## Licencia
 
 Este proyecto está bajo la licencia [Your License]. Ver el archivo `LICENSE` para más detalles.
