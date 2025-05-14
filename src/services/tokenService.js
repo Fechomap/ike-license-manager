@@ -34,10 +34,21 @@ Si tienes dudas, contáctanos.
   };
 };
 
+// Función auxiliar para obtener el primer día del mes siguiente después de X meses
+exports.getFirstDayOfNextMonthAfterMonths = (date, months) => {
+  const newDate = new Date(date);
+  // Avanzar al mes siguiente + los meses adicionales solicitados
+  newDate.setMonth(newDate.getMonth() + months);
+  // Establecer el día 1 del mes
+  newDate.setDate(1);
+  return newDate;
+};
+
 exports.createToken = async (userData) => {
   const token = crypto.randomBytes(16).toString('hex');
   const createdAt = new Date();
-  const provisionalExpiresAt = new Date(createdAt.getTime() + 365 * 24 * 60 * 60 * 1000);
+  // La fecha de expiración será el primer día del mes siguiente
+  const provisionalExpiresAt = this.getFirstDayOfNextMonthAfterMonths(createdAt, 1);
   const tokenRecord = new Token({ token, ...userData, createdAt, expiresAt: provisionalExpiresAt });
   
   try {
@@ -53,13 +64,11 @@ exports.createToken = async (userData) => {
   }
 };
 
-
 exports.isTokenValid = async (token) => {
   const tokenRecord = await Token.findOne({ token });
   // Solo verifica existencia y que no haya expirado
   return !!(tokenRecord && new Date() <= tokenRecord.expiresAt);
 };
-
 
 exports.getShareLinks = async (token) => {
   try {
@@ -165,7 +174,7 @@ exports.exportToExcel = async () => {
 
 /**
  * Valida y canjea (redime) un token.
- * Al redimirlo, se actualiza la fecha de expiración a 30 días desde ese momento.
+ * Al redimirlo, se actualiza la fecha de expiración al primer día del mes siguiente.
  */
 exports.validateAndRedeemToken = async (token, machineId, clientInfo) => {
   const tokenRecord = await Token.findOne({ token });
@@ -196,8 +205,8 @@ exports.validateAndRedeemToken = async (token, machineId, clientInfo) => {
     timestamp: redeemedAt
   };
 
-  // Actualizar la fecha de expiración para que sean 30 días a partir de la redención
-  tokenRecord.expiresAt = new Date(redeemedAt.getTime() + 30 * 24 * 60 * 60 * 1000);
+  // ACTUALIZADO: Establecer la fecha de expiración al primer día del mes siguiente
+  tokenRecord.expiresAt = this.getFirstDayOfNextMonthAfterMonths(redeemedAt, 1);
   await tokenRecord.save();
 
   return {
@@ -216,6 +225,7 @@ exports.getExpiredTokens = async () => {
 };
 
 // Función auxiliar para añadir meses a una fecha manteniendo el día
+// Mantenemos esta función por compatibilidad, aunque ya no la usaremos para renovaciones
 exports.addMonthsToDate = (date, months) => {
   const newDate = new Date(date);
   const currentMonth = newDate.getMonth();
@@ -232,20 +242,12 @@ exports.renewToken = async (tokenId, months) => {
     throw new Error('Token no encontrado');
   }
 
+  // ACTUALIZADO: Siempre usar la fecha actual como base y establecer al primer día del mes siguiente
   const now = new Date();
-  let baseDate;
-
-  // Determinar la fecha base para la renovación
-  if (token.expiresAt > now) {
-    // Si el token aún no ha expirado, usar su fecha de expiración como base
-    baseDate = token.expiresAt;
-  } else {
-    // Si el token ya expiró, usar la fecha actual como base
-    baseDate = now;
-  }
-
-  // Añadir los meses a la fecha base
-  const newExpiryDate = this.addMonthsToDate(baseDate, months);
+  
+  // Calcular la nueva fecha de expiración como el primer día del mes después de los meses solicitados
+  const newExpiryDate = this.getFirstDayOfNextMonthAfterMonths(now, months);
+  
   token.expiresAt = newExpiryDate;
   await token.save();
   
