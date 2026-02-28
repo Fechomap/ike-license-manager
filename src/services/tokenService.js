@@ -30,34 +30,35 @@ Si tienes dudas, contáctanos.
 
   return {
     whatsapp: whatsappLink,
-    email: emailLink
+    email: emailLink,
   };
 };
 
 // Función auxiliar para obtener el primer día del mes siguiente después de X meses
-exports.getFirstDayOfNextMonthAfterMonths = (date, months) => {
+function getFirstDayOfNextMonthAfterMonths(date, months) {
   const newDate = new Date(date);
   // Avanzar al mes siguiente + los meses adicionales solicitados
   newDate.setMonth(newDate.getMonth() + months);
   // Establecer el día 1 del mes
   newDate.setDate(1);
   return newDate;
-};
+}
+exports.getFirstDayOfNextMonthAfterMonths = getFirstDayOfNextMonthAfterMonths;
 
 exports.createToken = async (userData) => {
   const token = crypto.randomBytes(16).toString('hex');
   const createdAt = new Date();
   // La fecha de expiración será el primer día del mes siguiente
-  const provisionalExpiresAt = this.getFirstDayOfNextMonthAfterMonths(createdAt, 1);
+  const provisionalExpiresAt = getFirstDayOfNextMonthAfterMonths(createdAt, 1);
   const tokenRecord = new Token({ token, ...userData, createdAt, expiresAt: provisionalExpiresAt });
-  
+
   try {
     await tokenRecord.save();
     // Generar links de compartir después de crear el token
     const shareLinks = generateShareLinks(tokenRecord);
     return {
       ...tokenRecord.toObject(),
-      shareLinks
+      shareLinks,
     };
   } catch (error) {
     throw new Error(`Error al crear el token: ${error.message}`);
@@ -85,7 +86,9 @@ exports.getShareLinks = async (token) => {
 // Las funciones existentes se mantienen igual
 exports.validateToken = async (token) => {
   const record = await Token.findOne({ token });
-  if (!record) return false;
+  if (!record) {
+    return false;
+  }
   return new Date() <= record.expiresAt;
 };
 
@@ -94,16 +97,24 @@ exports.getTokensExpiringSoon = async (days = 7) => {
   const upcomingDate = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
   return await Token.find({
     expiresAt: { $gte: now, $lte: upcomingDate },
-    isRedeemed: true
+    isRedeemed: true,
   }).sort({ expiresAt: 1 });
 };
 
-exports.getAllTokens = async () => {
-  const tokens = await Token.find({}).sort({ createdAt: -1 });
-  return tokens.map(token => ({
+exports.getAllTokens = async (skip = 0, limit = 0) => {
+  let query = Token.find({}).sort({ createdAt: -1 }).skip(skip);
+  if (limit > 0) {
+    query = query.limit(limit);
+  }
+  const tokens = await query;
+  return tokens.map((token) => ({
     ...token.toObject(),
-    remainingDays: calculateRemainingDays(token.expiresAt)
+    remainingDays: calculateRemainingDays(token.expiresAt),
   }));
+};
+
+exports.getTotalTokens = async () => {
+  return Token.countDocuments({});
 };
 
 const calculateRemainingDays = (expiresAt) => {
@@ -119,33 +130,33 @@ const calculateRemainingDays = (expiresAt) => {
  */
 exports.exportToExcel = async () => {
   const tokens = await Token.find({}).sort({ createdAt: -1 });
-  
+
   // Mapear cada token a un objeto con el formato deseado
-  const data = tokens.map(token => {
+  const data = tokens.map((token) => {
     const remainingDays = calculateRemainingDays(token.expiresAt);
     const isActive = remainingDays > 0;
-    
+
     return {
-      'Token': token.token,
-      'Email': token.email,
-      'Nombre': token.name,
-      'Teléfono': token.phone,
+      Token: token.token,
+      Email: token.email,
+      Nombre: token.name,
+      Teléfono: token.phone,
       'Fecha de Alta': token.createdAt.toLocaleString('es-MX', {
         day: '2-digit',
         month: '2-digit',
         year: 'numeric',
         hour: '2-digit',
-        minute: '2-digit'
+        minute: '2-digit',
       }),
       'Fecha de Expiración': token.expiresAt.toLocaleString('es-MX', {
         day: '2-digit',
         month: '2-digit',
         year: 'numeric',
         hour: '2-digit',
-        minute: '2-digit'
+        minute: '2-digit',
       }),
       'Días Restantes': remainingDays,
-      'Estado': isActive ? 'Activo' : 'Expirado'
+      Estado: isActive ? 'Activo' : 'Expirado',
     };
   });
 
@@ -162,7 +173,7 @@ exports.exportToExcel = async () => {
     { wch: 20 }, // Fecha de Alta
     { wch: 20 }, // Fecha de Expiración
     { wch: 15 }, // Días Restantes
-    { wch: 10 }  // Estado
+    { wch: 10 }, // Estado
   ];
 
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Tokens');
@@ -187,7 +198,7 @@ exports.validateAndRedeemToken = async (token, machineId, clientInfo) => {
     return {
       success: false,
       message: 'Token ya ha sido utilizado',
-      redeemedAt: tokenRecord.redeemedAt
+      redeemedAt: tokenRecord.redeemedAt,
     };
   }
 
@@ -202,17 +213,17 @@ exports.validateAndRedeemToken = async (token, machineId, clientInfo) => {
   tokenRecord.redemptionDetails = {
     ip: clientInfo.ip,
     deviceInfo: clientInfo.deviceInfo || 'No proporcionado',
-    timestamp: redeemedAt
+    timestamp: redeemedAt,
   };
 
   // ACTUALIZADO: Establecer la fecha de expiración al primer día del mes siguiente
-  tokenRecord.expiresAt = this.getFirstDayOfNextMonthAfterMonths(redeemedAt, 1);
+  tokenRecord.expiresAt = getFirstDayOfNextMonthAfterMonths(redeemedAt, 1);
   await tokenRecord.save();
 
   return {
     success: true,
     message: 'Token validado y activado correctamente',
-    expiresAt: tokenRecord.expiresAt
+    expiresAt: tokenRecord.expiresAt,
   };
 };
 
@@ -220,20 +231,21 @@ exports.validateAndRedeemToken = async (token, machineId, clientInfo) => {
 exports.getExpiredTokens = async () => {
   const now = new Date();
   return await Token.find({
-    expiresAt: { $lt: now }
+    expiresAt: { $lt: now },
   }).sort({ expiresAt: 1 });
 };
 
 // Función auxiliar para añadir meses a una fecha manteniendo el día
 // Mantenemos esta función por compatibilidad, aunque ya no la usaremos para renovaciones
-exports.addMonthsToDate = (date, months) => {
+function addMonthsToDate(date, months) {
   const newDate = new Date(date);
   const currentMonth = newDate.getMonth();
   const targetMonth = currentMonth + months;
-  
+
   newDate.setMonth(targetMonth);
   return newDate;
-};
+}
+exports.addMonthsToDate = addMonthsToDate;
 
 // Renovar token por meses
 exports.renewToken = async (tokenId, months) => {
@@ -244,12 +256,12 @@ exports.renewToken = async (tokenId, months) => {
 
   // ACTUALIZADO: Siempre usar la fecha actual como base y establecer al primer día del mes siguiente
   const now = new Date();
-  
+
   // Calcular la nueva fecha de expiración como el primer día del mes después de los meses solicitados
-  const newExpiryDate = this.getFirstDayOfNextMonthAfterMonths(now, months);
-  
+  const newExpiryDate = getFirstDayOfNextMonthAfterMonths(now, months);
+
   token.expiresAt = newExpiryDate;
   await token.save();
-  
+
   return token;
 };

@@ -14,8 +14,8 @@ const tokenSchema = new mongoose.Schema({
   redemptionDetails: {
     ip: String,
     deviceInfo: String,
-    timestamp: Date
-  }
+    timestamp: Date,
+  },
 });
 
 module.exports = mongoose.model('Token', tokenSchema);

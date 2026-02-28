@@ -5,7 +5,7 @@ const apiRoutes = require('./routes/apiRoutes');
 const telegramService = require('./services/telegramService');
 const config = require('./config/config');
 
-const PORT = process.env.PORT || 3000;
+const PORT = config.port;
 
 // Middlewares
 app.use(express.json());
@@ -23,10 +23,12 @@ if (config.isProduction) {
 const startServer = async () => {
   try {
     await connectDB();
-    
+
     app.listen(PORT, () => {
       console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
-      console.log(`📍 Modo: ${config.isProduction ? 'Producción (Webhook)' : 'Desarrollo (Polling)'}`);
+      console.log(
+        `📍 Modo: ${config.isProduction ? 'Producción (Webhook)' : 'Desarrollo (Polling)'}`,
+      );
     });
 
     console.log('✅ Servicio de Telegram iniciado');

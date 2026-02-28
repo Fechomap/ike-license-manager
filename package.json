@@ -1,12 +1,18 @@
 {
   "name": "ike-license-manager",
   "version": "1.0.0",
-  "description": "Sistema de gestión de licencias con integración de Telegram y WhatsApp",
+  "description": "Sistema de gestión de licencias con integración de Telegram",
   "main": "src/app.js",
   "scripts": {
-    "start": "node src/app.js",
-    "dev": "nodemon src/app.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "tsc",
+    "start": "node dist/app.js",
+    "dev": "tsx watch src/app.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "format": "prettier --write \"src/**/*.{ts,js,json}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,js,json}\"",
+    "check": "npm run typecheck && npm run lint && npm run format:check"
   },
   "engines": {
     "node": ">=16.0.0",
@@ -14,24 +20,32 @@
   },
   "keywords": [
     "license-manager",
-    "telegram-bot",
-    "whatsapp-integration"
+    "telegram-bot"
   ],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.9.5",
     "node-telegram-bot-api": "^0.66.0",
-    "nodemailer": "^6.9.16",
-    "stripe": "^17.5.0",
-    "whatsapp-web.js": "^1.26.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "nodemon": "^3.1.9"
+    "@eslint/js": "^9.39.3",
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^25.3.2",
+    "@types/node-telegram-bot-api": "^0.64.14",
+    "@typescript-eslint/eslint-plugin": "^8.56.1",
+    "@typescript-eslint/parser": "^8.56.1",
+    "eslint": "^9.39.3",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-import": "^2.32.0",
+    "nodemon": "^3.1.9",
+    "prettier": "^3.8.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
   }
 }
