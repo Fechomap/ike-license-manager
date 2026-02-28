@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(echo:*)",
+      "Bash(git add:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git status:*)",
+      "Bash(git show:*)",
+      "Bash(git blame:*)",
+      "Bash(rg:*)",
+      "Bash(ls:*)",
+      "Bash(npm start:*)",
+      "Bash(npm run:*)",
+      "Bash(node:*)",
+      "Bash(mkdir:*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:npmjs.com)",
+      "WebFetch(domain:mongoosejs.com)",
+      "WebFetch(domain:expressjs.com)",
+      "WebFetch(domain:typescriptlang.org)",
+      "mcp__playwright__*",
+      "Bash(find:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx prettier:*)",
+      "Bash(npx eslint:*)",
+      "Bash(npx vitest run)",
+      "Bash(npx vitest:*)"
+    ]
+  },
+  "enableAllProjectMcpServers": false
+}

@@ -1,0 +1,107 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep",
+      "Bash(npm:*)",
+      "Bash(node:*)",
+      "Bash(rm:*)",
+      "Bash(cd:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git blame:*)",
+      "Bash(ls:*)",
+      "Bash(tree:*)",
+      "Bash(wc:*)",
+      "Bash(sort:*)",
+      "Bash(jq:*)",
+      "Bash(curl:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx prettier:*)",
+      "Bash(npx eslint:*)",
+      "Bash(npx vitest:*)",
+      "Write(src/**)",
+      "Write(config/**)",
+      "Write(scripts/**)",
+      "Write(tests/**)",
+      "Write(docs/**)",
+      "Edit(src/**)",
+      "Edit(config/**)",
+      "Edit(scripts/**)",
+      "Edit(tests/**)",
+      "Edit(docs/**)",
+      "mcp__playwright__*"
+    ],
+    "deny": [
+      "Write(.env)",
+      "Write(.env.*)",
+      "Read(.env)",
+      "Read(.env.*)",
+      "Write(**/secrets/**)",
+      "Read(**/secrets/**)",
+      "Bash(DROP:*)",
+      "Bash(DELETE FROM:*)",
+      "Bash(TRUNCATE:*)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"additionalContext\": \"CONTEXTO POST-COMPACTACION: Proyecto LICENSE-MANAGER (Express + MongoDB + Telegram Bot). Version: '\"$(cd \"/Users/jhonvc/NODE HEROKU/LICENSE-MANAGER\" && node -p \"require('./package.json').version\" 2>/dev/null || echo desconocida)\"'. Branch: '\"$(cd \"/Users/jhonvc/NODE HEROKU/LICENSE-MANAGER\" && git branch --show-current 2>/dev/null || echo desconocido)\"'. REGLAS CRITICAS: 1) Arquitectura Routes->Controllers->Services->Models 2) MongoDB via Mongoose ODM 3) Telegram bot: Polling (dev) / Webhook (prod) 4) CommonJS (require/module.exports) 5) Tokens expiran el 1er dia del mes siguiente 6) Operaciones destructivas requieren aprobacion\"}'"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "osascript -e 'display notification \"Claude Code necesita tu atencion\" with title \"Claude Code\" sound name \"Ping\"' 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if echo \"$CLAUDE_TOOL_INPUT\" | grep -qiE '(git restore|git checkout (--|\\.)|git clean|git reset --hard|git stash drop|git branch -D|git push.*(--force|-f)|rm -rf /|mongo.*dropDatabase|mongo.*drop\\()'; then echo '{\"decision\": \"ask\", \"message\": \"Operacion destructiva: requiere tu aprobacion\"}'; exit 0; fi"
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if echo \"$CLAUDE_FILE_PATHS\" | grep -qE '\\.(env|secrets)'; then echo '{\"decision\": \"block\", \"reason\": \"Archivo sensible protegido\"}'; exit 0; fi"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Review $ARGUMENTS. If code files (.js, .ts, .json) were modified during this session, remind the user to test with 'npm run dev'. Keep it to one short sentence. If no code was modified, say nothing.",
+            "statusMessage": "Verificando cambios..."
+          }
+        ]
+      }
+    ]
+  },
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  }
+}
