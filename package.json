@@ -2,11 +2,11 @@
   "name": "ike-license-manager",
   "version": "1.0.0",
   "description": "Sistema de gestión de licencias con integración de Telegram",
-  "main": "src/app.js",
+  "main": "dist/app.js",
   "scripts": {
     "build": "tsc",
     "start": "node dist/app.js",
-    "dev": "tsx watch src/app.js",
+    "dev": "tsx watch src/app.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",

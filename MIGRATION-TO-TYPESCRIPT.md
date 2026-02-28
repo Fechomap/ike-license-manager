@@ -196,51 +196,69 @@ interface UserState {
 | `eslint src/` | 0 errores, 4 warnings menores (catch params, return await) |
 | `prettier --check` | Todos los archivos pasan |
 
-### Fase 2 — Config + Model (riesgo bajo)
+### Fase 2 — Config + Model (riesgo bajo) ✅ COMPLETADA (2026-02-28)
 > Modulos sin dependencias internas complejas
 
-- [ ] Migrar `src/config/config.js` → `config.ts` con interface `AppConfig`
-- [ ] Migrar `src/config/database.js` → `database.ts`
-- [ ] Migrar `src/models/tokenModel.js` → `tokenModel.ts` con interface `IToken`
+- [x] Migrar `src/config/config.js` → `config.ts` con interface `AppConfig` + validacion `getRequiredEnv()`
+- [x] Migrar `src/config/database.js` → `database.ts`
+- [x] Migrar `src/models/tokenModel.js` → `tokenModel.ts` con interfaces `IToken`, `IRedemptionDetails`, `ITokenDocument`
+- [x] Compatibilidad CJS: `module.exports` en cada .ts para que los .js existentes sigan funcionando
+- [x] Boot test: MongoDB + Telegram inician correctamente con los modulos TS
 
-### Fase 3 — Servicios Core (riesgo alto)
+#### Evidencia de cierre Fase 2
+
+| Validacion | Resultado |
+|------------|-----------|
+| `tsc --noEmit` | 0 errores |
+| `eslint` en 3 archivos TS | 0 errores, 0 warnings |
+| `prettier --check` | Todos pasan |
+| App boot (tsx src/app.js) | MongoDB OK, Telegram OK |
+
+### Fase 3 — Servicios Core (riesgo alto) ✅ COMPLETADA (2026-02-28)
 > Logica de negocio, archivo mas complejo
 
-- [ ] Migrar `src/services/tokenService.js` → `tokenService.ts`
-  - Convertir `exports.fn` a `export function`
-  - Definir tipos de retorno para cada funcion
-  - Tipar `ValidationResult` como discriminated union
-- [ ] Migrar `src/services/authService.js` → `authService.ts` (si se conserva)
+- [x] Migrar `src/services/tokenService.ts` — 13 funciones exportadas, 6 interfaces/tipos locales (UserData, ShareLinks, ClientInfo, TokenWithShareLinks, TokenWithRemainingDays, ValidationResult)
+- [x] Migrar `src/services/authService.ts` — generateToken + verifyToken tipados
 
-### Fase 4 — Telegram (riesgo medio)
+### Fase 4 — Telegram (riesgo medio) ✅ COMPLETADA (2026-02-28)
 > Clase singleton con estado conversacional
 
-- [ ] Migrar `src/services/telegramService.js` → `telegramService.ts`
-  - Tipar `userStates: Map<number, UserState>`
-  - Tipar callback_query data parsing
-  - Exportar clase e instancia
+- [x] Migrar `src/services/telegramService.ts` — clase TelegramService tipada, `userStates: Map<number, UserState>`, callbacks con `TelegramBot.Message` y `TelegramBot.CallbackQuery`, handlers refactorizados para ESLint no-misused-promises
 
-### Fase 5 — Controllers + Routes (riesgo medio)
+### Fase 5 — Controllers + Routes (riesgo medio) ✅ COMPLETADA (2026-02-28)
 > Capa HTTP
 
-- [ ] Migrar `src/controllers/apiController.js` → `apiController.ts`
-  - Tipar `Request`, `Response` de Express
-  - Tipar bodies y params
-- [ ] Migrar `src/routes/apiRoutes.js` → `apiRoutes.ts`
+- [x] Migrar `src/controllers/apiController.ts` — handlers tipados `(req: Request, res: Response): Promise<void>`, guard para adminChatId undefined
+- [x] Migrar `src/routes/apiRoutes.ts` — Router tipado con ES imports
 
-### Fase 6 — Entry Point (riesgo bajo)
+### Fase 6 — Entry Point (riesgo bajo) ✅ COMPLETADA (2026-02-28)
 > Glue code
 
-- [ ] Migrar `src/app.js` → `app.ts`
-- [ ] Verificar build completo con `tsc`
-- [ ] Verificar ejecucion con `tsx src/app.ts`
+- [x] Migrar `src/app.ts` — ES imports, startServer tipado
+- [x] package.json actualizado: `dev` → `tsx watch src/app.ts`, `main` → `dist/app.js`
 
-### Fase 7 — Scripts (riesgo bajo, independientes)
+### Fase 7 — Scripts (riesgo bajo, independientes) ✅ COMPLETADA (2026-02-28)
 > Utilidades standalone
 
-- [ ] Migrar `src/scripts/exportTokens.js` → `exportTokens.ts`
-- [ ] Migrar `src/scripts/importTokens.js` → `importTokens.ts`
-- [ ] Migrar `src/scripts/deleteDatabase.js` → `deleteDatabase.ts`
+- [x] Migrar `src/scripts/exportTokens.ts` — interface ExcelExportRow, formatDate tipado
+- [x] Migrar `src/scripts/importTokens.ts` — interfaces ExcelRow, ImportResults, TokenUpdateFields
+- [x] Migrar `src/scripts/deleteDatabase.ts` — readline refactorizado a Promise
+
+### Limpieza post-migracion ✅ COMPLETADA (2026-02-28)
+
+- [x] Eliminados bloques `module.exports` de compatibilidad CJS de 6 archivos
+- [x] `allowJs: false` en tsconfig.json
+- [x] 0 archivos .js en src/, 12 archivos .ts
+
+#### Evidencia de cierre Fases 3-7
+
+| Validacion | Resultado |
+|------------|-----------|
+| `tsc --noEmit` | 0 errores |
+| `eslint src/` | 0 errores, 2 warnings (non-null assertion en authService — aceptable) |
+| `prettier --check` | Todos los archivos pasan |
+| Archivos .js en src/ | 0 |
+| Archivos .ts en src/ | 12 |
 
 ---
 
