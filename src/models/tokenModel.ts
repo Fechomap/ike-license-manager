@@ -1,7 +1,8 @@
 import type { Token } from '../generated/prisma/client';
+import type { TokenStatus } from '../generated/prisma/enums';
 
-// Re-export del tipo generado por Prisma
-export type { Token };
+// Re-export de tipos generados por Prisma
+export type { Token, TokenStatus };
 
 // Alias de compatibilidad para el resto del codigo
 export type ITokenDocument = Token;
@@ -16,6 +17,8 @@ export interface IToken {
   isRedeemed: boolean;
   redeemedAt?: Date | null;
   machineId?: string | null;
+  status: TokenStatus;
+  statusReason?: string | null;
   redemptionDetails?: IRedemptionDetails;
 }
 

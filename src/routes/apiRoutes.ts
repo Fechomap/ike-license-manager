@@ -39,5 +39,6 @@ router.post('/login', loginLimiter, apiController.login);
 
 // Protegidos (admin)
 router.get('/tokens', authenticate, apiController.getAllTokens);
+router.patch('/tokens/:token/status', authenticate, apiController.updateTokenStatus);
 
 export default router;

@@ -2,6 +2,7 @@
 import type { Request, Response } from 'express';
 
 import config from '../config/config';
+import { TokenStatus } from '../generated/prisma/enums';
 import { generateToken as generateJwt } from '../services/authService';
 import * as tokenService from '../services/tokenService';
 
@@ -163,6 +164,22 @@ export async function checkTokenValidity(req: Request, res: Response): Promise<v
 
     const result = await tokenService.checkTokenStatus(token);
 
+    if (!result) {
+      logStructured({
+        event: 'token_check_validity',
+        token: maskToken(token),
+        success: false,
+        errorCode: 'TOKEN_NOT_FOUND',
+        timestamp: new Date().toISOString(),
+      });
+      res.status(404).json({
+        valid: false,
+        status: 'not_found',
+        message: 'Token no encontrado',
+      });
+      return;
+    }
+
     logStructured({
       event: 'token_check_validity',
       token: maskToken(token),
@@ -260,5 +277,49 @@ export async function login(req: Request, res: Response): Promise<void> {
     });
     console.error('Error en login:', message);
     res.status(500).json({ success: false, message: 'Error al generar token' });
+  }
+}
+
+const VALID_STATUSES = new Set(Object.values(TokenStatus));
+
+export async function updateTokenStatus(req: Request, res: Response): Promise<void> {
+  try {
+    const rawToken = req.params.token;
+    const tokenParam = Array.isArray(rawToken) ? rawToken[0] : rawToken;
+    const { status, reason } = req.body as { status?: string; reason?: string };
+
+    if (!tokenParam || !isValidTokenFormat(tokenParam)) {
+      res.status(400).json({ success: false, message: 'Formato de token invalido' });
+      return;
+    }
+
+    if (!status || !VALID_STATUSES.has(status as TokenStatus)) {
+      res.status(400).json({
+        success: false,
+        message: `Status invalido. Valores permitidos: ${[...VALID_STATUSES].join(', ')}`,
+      });
+      return;
+    }
+
+    const updated = await tokenService.updateTokenStatus(tokenParam, status as TokenStatus, reason);
+
+    logStructured({
+      event: 'token_status_update',
+      token: maskToken(tokenParam),
+      success: true,
+      timestamp: new Date().toISOString(),
+    });
+
+    res.json({ success: true, token: updated });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    logStructured({
+      event: 'token_status_update',
+      success: false,
+      errorCode: 'INTERNAL_ERROR',
+      timestamp: new Date().toISOString(),
+    });
+    console.error('Error actualizando status:', message);
+    res.status(500).json({ success: false, message: 'Error al actualizar status del token' });
   }
 }

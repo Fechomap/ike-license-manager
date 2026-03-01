@@ -7,6 +7,13 @@ datasource db {
   provider = "postgresql"
 }
 
+enum TokenStatus {
+  active
+  expired
+  suspended
+  cancelled
+}
+
 model Token {
   id                   String    @id @default(cuid())
   token                String    @unique
@@ -21,8 +28,11 @@ model Token {
   redemptionIp         String?
   redemptionDeviceInfo String?
   redemptionTimestamp  DateTime?
+  status               TokenStatus @default(active)
+  statusReason         String?
 
   @@index([expiresAt])
+  @@index([status])
   @@index([isRedeemed])
   @@map("tokens")
 }

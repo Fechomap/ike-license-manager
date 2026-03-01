@@ -5,8 +5,11 @@ import * as path from 'path';
 
 import * as XLSX from 'xlsx';
 
+import { TokenStatus } from '../generated/prisma/enums';
 import prisma from '../lib/prisma';
 import { getFirstDayOfNextMonthAfterMonths } from '../services/tokenService';
+
+const VALID_STATUSES = new Set(Object.values(TokenStatus));
 
 interface ExcelRow {
   // Columnas comunes (sin variantes)
@@ -14,6 +17,7 @@ interface ExcelRow {
   Email?: string;
   Nombre?: string;
   Estado?: string;
+  Estado_Licencia?: string;
 
   // Sin acento / underscore (exportTokens.ts)
   Telefono?: string;
@@ -59,6 +63,7 @@ interface TokenUpdateFields {
   redemptionIp?: string;
   redemptionDeviceInfo?: string;
   redemptionTimestamp?: Date;
+  status?: TokenStatus;
 }
 
 interface TokenCreateData {
@@ -74,6 +79,7 @@ interface TokenCreateData {
   redemptionIp?: string;
   redemptionDeviceInfo?: string;
   redemptionTimestamp?: Date;
+  status?: TokenStatus;
 }
 
 function parseDate(dateStr: string | undefined | null): Date | null {
@@ -170,6 +176,11 @@ async function importTokens(): Promise<void> {
         const idMaquina = row.ID_Maquina || row['ID_Máquina'];
         const ipRedencion = row.IP_Redencion || row['IP_Redención'];
         const dispositivoRedencion = row.Dispositivo_Redencion || row['Dispositivo_Redención'];
+        const estadoLicencia = row.Estado_Licencia;
+        const tokenStatus: TokenStatus | undefined =
+          estadoLicencia && VALID_STATUSES.has(estadoLicencia as TokenStatus)
+            ? (estadoLicencia as TokenStatus)
+            : undefined;
 
         // Parsear las fechas
         let createdAt: Date;
@@ -255,6 +266,9 @@ async function importTokens(): Promise<void> {
           if (redeemedAt) {
             updateFields.redemptionTimestamp = redeemedAt;
           }
+          if (tokenStatus) {
+            updateFields.status = tokenStatus;
+          }
 
           await prisma.token.update({
             where: { token: row.Token },
@@ -274,6 +288,7 @@ async function importTokens(): Promise<void> {
             expiresAt: expiresAt,
             isRedeemed: row.Estado === 'Canjeado',
             redeemedAt: redeemedAt ?? undefined,
+            status: tokenStatus,
           };
 
           if (idMaquina) {

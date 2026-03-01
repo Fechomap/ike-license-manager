@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import * as XLSX from 'xlsx';
 
 import type { Token } from '../generated/prisma/client';
+import { TokenStatus } from '../generated/prisma/enums';
 import prisma from '../lib/prisma';
 import { getRedemptionDetails } from '../models/tokenModel';
 
@@ -38,6 +39,8 @@ interface TokenWithShareLinks {
   isRedeemed: boolean;
   redeemedAt: Date | null;
   machineId: string | null;
+  status: TokenStatus;
+  statusReason: string | null;
   shareLinks: ShareLinks;
 }
 
@@ -52,6 +55,8 @@ interface TokenWithRemainingDays {
   isRedeemed: boolean;
   redeemedAt: Date | null;
   machineId: string | null;
+  status: TokenStatus;
+  statusReason: string | null;
   redemptionDetails?: { ip?: string; deviceInfo?: string; timestamp?: Date };
   remainingDays: number;
 }
@@ -62,8 +67,10 @@ type ValidationResult =
 
 export interface TokenStatusResult {
   valid: boolean;
+  status: string;
+  expiresAt: string;
   message: string;
-  expiresAt?: Date;
+  reason?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -126,16 +133,6 @@ export function getFirstDayOfNextMonthAfterMonths(date: Date, months: number): D
   return newDate;
 }
 
-/**
- * Añade meses a una fecha manteniendo el día (en UTC).
- * Se mantiene por compatibilidad, aunque ya no se usa para renovaciones.
- */
-export function addMonthsToDate(date: Date, months: number): Date {
-  const newDate = new Date(date);
-  newDate.setUTCMonth(newDate.getUTCMonth() + months);
-  return newDate;
-}
-
 // ---------------------------------------------------------------------------
 // Funciones de servicio (exportadas)
 // ---------------------------------------------------------------------------
@@ -169,49 +166,49 @@ export async function createToken(userData: UserData): Promise<TokenWithShareLin
   }
 }
 
-export async function isTokenValid(token: string): Promise<boolean> {
-  const tokenRecord = await prisma.token.findUnique({ where: { token } });
-  // Solo verifica existencia y que no haya expirado
-  return !!(tokenRecord && new Date() <= tokenRecord.expiresAt);
-}
-
 /**
  * Verifica el estado de un token y devuelve un objeto con detalles.
- * A diferencia de isTokenValid, retorna informacion estructurada sin redimir.
+ * Retorna null si el token no existe (el controller decide el HTTP status).
  */
-export async function checkTokenStatus(token: string): Promise<TokenStatusResult> {
+export async function checkTokenStatus(token: string): Promise<TokenStatusResult | null> {
   const tokenRecord = await prisma.token.findUnique({ where: { token } });
 
   if (!tokenRecord) {
-    return { valid: false, message: 'Token no encontrado' };
+    return null;
   }
 
-  if (tokenRecord.expiresAt && new Date() > tokenRecord.expiresAt) {
-    return { valid: false, message: 'Token expirado' };
+  const expiresAtISO = tokenRecord.expiresAt.toISOString();
+
+  // Verificar status administrativo primero
+  if (
+    tokenRecord.status === TokenStatus.suspended ||
+    tokenRecord.status === TokenStatus.cancelled
+  ) {
+    return {
+      valid: false,
+      status: tokenRecord.status,
+      expiresAt: expiresAtISO,
+      message: `Token ${tokenRecord.status}`,
+      reason: tokenRecord.statusReason ?? undefined,
+    };
   }
 
-  return { valid: true, message: 'Token valido', expiresAt: tokenRecord.expiresAt };
-}
-
-export async function getShareLinks(token: string): Promise<ShareLinks> {
-  try {
-    const tokenRecord = await prisma.token.findUnique({ where: { token } });
-    if (!tokenRecord) {
-      throw new Error('Token no encontrado');
-    }
-    return generateShareLinks(tokenRecord);
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Error al generar enlaces de compartir: ${message}`);
+  // Verificar expiración por fecha
+  if (new Date() > tokenRecord.expiresAt) {
+    return {
+      valid: false,
+      status: 'expired',
+      expiresAt: expiresAtISO,
+      message: 'Token expirado',
+    };
   }
-}
 
-export async function validateToken(token: string): Promise<boolean> {
-  const record = await prisma.token.findUnique({ where: { token } });
-  if (!record) {
-    return false;
-  }
-  return new Date() <= record.expiresAt;
+  return {
+    valid: true,
+    status: 'active',
+    expiresAt: expiresAtISO,
+    message: 'Token valido',
+  };
 }
 
 export async function getTokensExpiringSoon(days: number = 7): Promise<Token[]> {
@@ -221,6 +218,7 @@ export async function getTokensExpiringSoon(days: number = 7): Promise<Token[]> 
     where: {
       expiresAt: { gte: now, lte: upcomingDate },
       isRedeemed: true,
+      status: TokenStatus.active,
     },
     orderBy: { expiresAt: 'asc' },
   });
@@ -256,7 +254,7 @@ export async function exportToExcel(): Promise<Buffer> {
   // Mapear cada token a un objeto con el formato deseado
   const data = tokens.map((token) => {
     const remainingDays = calculateRemainingDays(token.expiresAt);
-    const isActive = remainingDays > 0;
+    const isActive = token.status === TokenStatus.active && remainingDays > 0;
 
     return {
       Token: token.token,
@@ -279,6 +277,7 @@ export async function exportToExcel(): Promise<Buffer> {
       }),
       'Días Restantes': remainingDays,
       Estado: isActive ? 'Activo' : 'Expirado',
+      Estado_Licencia: token.status,
     };
   });
 
@@ -296,6 +295,7 @@ export async function exportToExcel(): Promise<Buffer> {
     { wch: 20 }, // Fecha de Expiración
     { wch: 15 }, // Días Restantes
     { wch: 10 }, // Estado
+    { wch: 15 }, // Estado_Licencia
   ];
 
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Tokens');
@@ -324,6 +324,7 @@ export async function validateAndRedeemToken(
       token,
       isRedeemed: false,
       expiresAt: { gte: redeemedAt },
+      status: TokenStatus.active,
     },
     data: {
       isRedeemed: true,
@@ -357,6 +358,20 @@ export async function validateAndRedeemToken(
     };
   }
 
+  if (tokenRecord.status !== TokenStatus.active) {
+    const statusErrorMap: Record<string, string> = {
+      suspended: 'TOKEN_SUSPENDED',
+      cancelled: 'TOKEN_CANCELLED',
+      expired: 'TOKEN_EXPIRED',
+    };
+    return {
+      success: false,
+      valid: false,
+      message: `Token ${tokenRecord.status}`,
+      errorCode: statusErrorMap[tokenRecord.status] || 'TOKEN_INACTIVE',
+    };
+  }
+
   if (tokenRecord.isRedeemed) {
     return {
       success: false,
@@ -376,7 +391,10 @@ export async function validateAndRedeemToken(
 export async function getExpiredTokens(): Promise<Token[]> {
   const now = new Date();
   return prisma.token.findMany({
-    where: { expiresAt: { lt: now } },
+    where: {
+      expiresAt: { lt: now },
+      status: TokenStatus.active,
+    },
     orderBy: { expiresAt: 'asc' },
   });
 }
@@ -394,6 +412,23 @@ export async function deleteToken(tokenValue: string): Promise<boolean> {
 }
 
 /**
+ * Actualiza el status administrativo de un token.
+ */
+export async function updateTokenStatus(
+  tokenValue: string,
+  status: TokenStatus,
+  reason?: string,
+): Promise<Token> {
+  return prisma.token.update({
+    where: { token: tokenValue },
+    data: {
+      status,
+      statusReason: reason ?? null,
+    },
+  });
+}
+
+/**
  * Renovar token por meses.
  */
 export async function renewToken(tokenId: string, months: number): Promise<Token> {
@@ -408,6 +443,10 @@ export async function renewToken(tokenId: string, months: number): Promise<Token
 
   return prisma.token.update({
     where: { token: tokenId },
-    data: { expiresAt: newExpiryDate },
+    data: {
+      expiresAt: newExpiryDate,
+      status: TokenStatus.active,
+      statusReason: null,
+    },
   });
 }

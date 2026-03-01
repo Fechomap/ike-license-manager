@@ -2,6 +2,7 @@
 import TelegramBot from 'node-telegram-bot-api';
 
 import config from '../config/config';
+import { TokenStatus } from '../generated/prisma/enums';
 
 import * as tokenService from './tokenService';
 
@@ -21,6 +22,21 @@ interface UserState {
 }
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+const STATUS_LABELS: Record<string, string> = {
+  active: '🟢 Activo',
+  expired: '🔴 Expirado',
+  suspended: '🟡 Suspendido',
+  cancelled: '❌ Cancelado',
+};
+
+function statusLabel(status: string): string {
+  return STATUS_LABELS[status] || status;
+}
+
+// ---------------------------------------------------------------------------
 // Teclado persistente
 // ---------------------------------------------------------------------------
 
@@ -28,6 +44,7 @@ const MAIN_KEYBOARD: TelegramBot.SendMessageOptions['reply_markup'] = {
   keyboard: [
     [{ text: '🎫 Generar Token' }, { text: '📋 Listar Tokens' }],
     [{ text: '⚠️ Por Caducar' }, { text: '❌ Expirados' }],
+    [{ text: '📊 Exportar Excel' }],
   ],
   resize_keyboard: true,
   one_time_keyboard: false,
@@ -68,6 +85,7 @@ class TelegramService {
         { command: 'listar_tokens', description: '📋 Listar todos los tokens' },
         { command: 'tokens_caducando', description: '⚠️ Tokens próximos a vencer' },
         { command: 'tokens_expirados', description: '❌ Tokens expirados' },
+        { command: 'exportar_excel', description: '📊 Exportar base de datos a Excel' },
       ]);
     } catch (error: unknown) {
       console.error(
@@ -112,6 +130,9 @@ class TelegramService {
     this.bot.onText(/\/tokens_expirados/, (msg: TelegramBot.Message) => {
       void this.handleExpiredTokens(msg);
     });
+    this.bot.onText(/\/exportar_excel/, (msg: TelegramBot.Message) => {
+      void this.handleExportExcel(msg);
+    });
 
     // Botones del teclado persistente
     this.bot.onText(/🎫 Generar Token/, (msg: TelegramBot.Message) => {
@@ -125,6 +146,9 @@ class TelegramService {
     });
     this.bot.onText(/❌ Expirados/, (msg: TelegramBot.Message) => {
       void this.handleExpiredTokens(msg);
+    });
+    this.bot.onText(/📊 Exportar Excel/, (msg: TelegramBot.Message) => {
+      void this.handleExportExcel(msg);
     });
 
     // Manejador de callbacks para los botones inline
@@ -160,20 +184,31 @@ class TelegramService {
           continue;
         }
 
-        const status = token.isRedeemed ? '✅ Canjeado' : '⏳ No canjeado';
+        const redeemStatus = token.isRedeemed ? '✅ Canjeado' : '⏳ No canjeado';
         const days = token.remainingDays || 0;
 
-        // SIN formato Markdown - texto plano
         const tokenMessage =
           `🔑 Token: ${token.token}\n` +
           `👤 Usuario: ${token.name || 'N/A'}\n` +
           `📧 Email: ${token.email || 'N/A'}\n` +
-          `📅 Estado: ${status}\n` +
+          `📅 Canje: ${redeemStatus}\n` +
+          `🏷️ Licencia: ${statusLabel(token.status)}\n` +
           `⏰ Días restantes: ${days}`;
 
-        await this.bot.sendMessage(msg.chat.id, tokenMessage);
+        const buttons: TelegramBot.InlineKeyboardButton[][] = [];
+        if (token.status === TokenStatus.active) {
+          buttons.push([
+            { text: '🚫 Suspender', callback_data: `suspend:${token.token}` },
+            { text: '❌ Cancelar', callback_data: `cancel:${token.token}` },
+          ]);
+        } else {
+          buttons.push([{ text: '✅ Reactivar', callback_data: `reactivate:${token.token}` }]);
+        }
 
-        // Pequeña pausa entre mensajes
+        await this.bot.sendMessage(msg.chat.id, tokenMessage, {
+          reply_markup: { inline_keyboard: buttons },
+        });
+
         await this.sleep(300);
       }
 
@@ -196,6 +231,7 @@ class TelegramService {
       tokens.forEach((token) => {
         message += `🔑 Token: ${token.token}\n`;
         message += `👤 Usuario: ${token.name}\n`;
+        message += `🏷️ Licencia: ${statusLabel(token.status)}\n`;
         message += `📅 Expira: ${token.expiresAt.toLocaleDateString()}\n\n`;
       });
 
@@ -229,6 +265,7 @@ class TelegramService {
           `👤 Usuario: ${token.name}\n` +
           `📧 Email: ${token.email}\n` +
           `📱 Teléfono: ${token.phone}\n` +
+          `🏷️ Licencia: ${statusLabel(token.status)}\n` +
           `📅 Fecha de expiración: ${token.expiresAt.toLocaleDateString('es-MX', {
             day: '2-digit',
             month: '2-digit',
@@ -236,23 +273,18 @@ class TelegramService {
           })}\n` +
           `${token.isRedeemed ? '✅ Token redimido' : '❌ Token no redimido'}`;
 
-        const inlineKeyboard = {
-          inline_keyboard: [
-            [
-              {
-                text: '🔄 Renovar',
-                callback_data: `renew:${token.token}`,
-              },
-              {
-                text: '🗑️ Borrar',
-                callback_data: `delete:${token.token}`,
-              },
-            ],
+        const buttons: TelegramBot.InlineKeyboardButton[][] = [
+          [
+            { text: '🔄 Renovar', callback_data: `renew:${token.token}` },
+            { text: '🗑️ Borrar', callback_data: `delete:${token.token}` },
           ],
-        };
+        ];
+        if (token.status !== TokenStatus.active) {
+          buttons.push([{ text: '✅ Reactivar', callback_data: `reactivate:${token.token}` }]);
+        }
 
         await this.bot.sendMessage(msg.chat.id, message, {
-          reply_markup: inlineKeyboard,
+          reply_markup: { inline_keyboard: buttons },
         });
 
         await this.sleep(500);
@@ -265,6 +297,26 @@ class TelegramService {
         error instanceof Error ? error.message : error,
       );
       await this.bot.sendMessage(msg.chat.id, '❌ Error al obtener la lista de tokens expirados');
+    }
+  }
+
+  async handleExportExcel(msg: TelegramBot.Message): Promise<void> {
+    try {
+      await this.bot.sendMessage(msg.chat.id, '⏳ Generando archivo Excel...');
+      const buffer = await tokenService.exportToExcel();
+      const filename = `tokens_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      await this.bot.sendDocument(
+        msg.chat.id,
+        buffer,
+        { caption: '📊 Base de datos de tokens exportada' },
+        {
+          filename,
+          contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        },
+      );
+    } catch (error: unknown) {
+      console.error('Error al exportar Excel:', error instanceof Error ? error.message : error);
+      await this.bot.sendMessage(msg.chat.id, '❌ Error al generar el archivo Excel');
     }
   }
 
@@ -348,6 +400,50 @@ class TelegramService {
           }
           break;
         }
+
+        case 'suspend': {
+          if (!tokenId) {
+            break;
+          }
+          await tokenService.updateTokenStatus(
+            tokenId,
+            TokenStatus.suspended,
+            'Suspendido por admin',
+          );
+          await this.bot.editMessageText('🚫 Token suspendido.', {
+            chat_id: chatId,
+            message_id: messageId,
+          });
+          break;
+        }
+
+        case 'cancel': {
+          if (!tokenId) {
+            break;
+          }
+          await tokenService.updateTokenStatus(
+            tokenId,
+            TokenStatus.cancelled,
+            'Cancelado por admin',
+          );
+          await this.bot.editMessageText('❌ Token cancelado.', {
+            chat_id: chatId,
+            message_id: messageId,
+          });
+          break;
+        }
+
+        case 'reactivate': {
+          if (!tokenId) {
+            break;
+          }
+          await tokenService.updateTokenStatus(tokenId, TokenStatus.active);
+          await this.bot.editMessageText('✅ Token reactivado.', {
+            chat_id: chatId,
+            message_id: messageId,
+          });
+          break;
+        }
       }
     } catch (error: unknown) {
       console.error('Error en callback handler:', error instanceof Error ? error.message : error);
@@ -396,13 +492,12 @@ class TelegramService {
         text.includes('🎫 Generar Token') ||
         text.includes('📋 Listar Tokens') ||
         text.includes('⚠️ Por Caducar') ||
-        text.includes('❌ Expirados');
+        text.includes('❌ Expirados') ||
+        text.includes('📊 Exportar Excel');
       if (!isHandled) {
-        await this.bot.sendMessage(
-          chatId,
-          '👋 Usa los botones del menú para continuar.',
-          { reply_markup: MAIN_KEYBOARD },
-        );
+        await this.bot.sendMessage(chatId, '👋 Usa los botones del menú para continuar.', {
+          reply_markup: MAIN_KEYBOARD,
+        });
       }
       return;
     }

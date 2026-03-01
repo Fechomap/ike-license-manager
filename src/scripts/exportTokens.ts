@@ -17,6 +17,7 @@ interface ExcelExportRow {
   Fecha_Creacion: string;
   Fecha_Expiracion: string;
   Estado: string;
+  Estado_Licencia: string;
   Fecha_Canje: string;
   ID_Maquina: string;
   IP_Redencion: string;
@@ -68,6 +69,7 @@ async function exportTokens(): Promise<void> {
       Fecha_Creacion: formatDate(token.createdAt),
       Fecha_Expiracion: formatDate(token.expiresAt),
       Estado: token.isRedeemed ? 'Canjeado' : 'No Canjeado',
+      Estado_Licencia: token.status,
       Fecha_Canje: formatDate(token.redeemedAt),
       ID_Maquina: token.machineId || '',
       IP_Redencion: token.redemptionIp || '',
@@ -87,6 +89,7 @@ async function exportTokens(): Promise<void> {
       { wch: 25 }, // Fecha_Creacion
       { wch: 25 }, // Fecha_Expiracion
       { wch: 12 }, // Estado
+      { wch: 15 }, // Estado_Licencia
       { wch: 25 }, // Fecha_Canje
       { wch: 20 }, // ID_Maquina
       { wch: 15 }, // IP_Redencion
