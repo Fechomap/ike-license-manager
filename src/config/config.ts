@@ -2,7 +2,7 @@ import 'dotenv/config';
 
 export interface AppConfig {
   port: number;
-  mongodbURI: string;
+  databaseUrl: string;
   telegramToken: string;
   jwtSecret: string;
   adminChatId: string | undefined;
@@ -32,7 +32,7 @@ function getLazyRequiredEnv(name: string): string {
 
 const config: AppConfig = {
   port: parseInt(process.env.PORT || '3000', 10),
-  mongodbURI: getRequiredEnv('MONGODB_URI'),
+  databaseUrl: getRequiredEnv('DATABASE_URL'),
   telegramToken: getLazyRequiredEnv('TELEGRAM_TOKEN'),
   jwtSecret: getLazyRequiredEnv('JWT_SECRET'),
   adminChatId: process.env.ADMIN_CHAT_ID,
