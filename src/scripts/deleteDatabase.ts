@@ -3,22 +3,14 @@ import 'dotenv/config';
 
 import * as readline from 'readline';
 
-import mongoose from 'mongoose';
-
-import config from '../config/config';
-import Token from '../models/tokenModel';
+import prisma from '../lib/prisma';
 
 async function deleteDatabase(): Promise<void> {
   try {
-    console.log('Conectando a MongoDB...');
+    console.log('Conectando a PostgreSQL...');
 
-    if (mongoose.connection.readyState !== 1) {
-      await mongoose.connect(config.mongodbURI);
-      console.log('Conectado a MongoDB');
-    }
-
-    // Primero, obtener estadisticas de la coleccion
-    const count = await Token.countDocuments();
+    // Primero, obtener estadisticas de la tabla
+    const count = await prisma.token.count();
     console.log(`Tokens encontrados en la base de datos: ${count}`);
 
     // Solicitar confirmacion antes de eliminar
@@ -44,22 +36,22 @@ async function deleteDatabase(): Promise<void> {
     if (answer.toUpperCase() === 'SI') {
       console.log('\nEliminando todos los tokens...');
 
-      // Eliminar todos los documentos de la coleccion
-      const result = await Token.deleteMany({});
+      // Eliminar todos los registros de la tabla
+      const result = await prisma.token.deleteMany({});
 
-      console.log(`Eliminacion completada. ${result.deletedCount} tokens han sido eliminados.`);
+      console.log(`Eliminacion completada. ${result.count} tokens han sido eliminados.`);
     } else {
       console.log('\nOperacion cancelada. No se ha eliminado ningun token.');
     }
 
     rl.close();
-    await mongoose.connection.close();
-    console.log('Conexion a MongoDB cerrada');
+    await prisma.$disconnect();
+    console.log('Conexion a PostgreSQL cerrada');
     process.exit(0);
   } catch (error) {
     console.error('Error al eliminar la base de datos:', error);
-    await mongoose.connection.close();
-    console.log('Conexion a MongoDB cerrada');
+    await prisma.$disconnect();
+    console.log('Conexion a PostgreSQL cerrada');
     process.exit(1);
   }
 }

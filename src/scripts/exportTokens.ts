@@ -4,11 +4,10 @@ import 'dotenv/config';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
-import mongoose from 'mongoose';
 import * as XLSX from 'xlsx';
 
-import config from '../config/config';
-import Token, { type IToken } from '../models/tokenModel';
+import type { Token } from '../generated/prisma/client';
+import prisma from '../lib/prisma';
 
 interface ExcelExportRow {
   Token: string;
@@ -58,12 +57,7 @@ async function exportTokens(): Promise<void> {
     const scriptsDir = path.join(__dirname, 'data');
     await fs.mkdir(scriptsDir, { recursive: true });
 
-    if (mongoose.connection.readyState !== 1) {
-      await mongoose.connect(config.mongodbURI);
-      console.log('Conectado a MongoDB');
-    }
-
-    const tokens: IToken[] = await Token.find({}).lean();
+    const tokens: Token[] = await prisma.token.findMany();
     console.log(`Encontrados ${tokens.length} tokens`);
 
     const excelData: ExcelExportRow[] = tokens.map((token) => ({
@@ -76,9 +70,9 @@ async function exportTokens(): Promise<void> {
       Estado: token.isRedeemed ? 'Canjeado' : 'No Canjeado',
       Fecha_Canje: formatDate(token.redeemedAt),
       ID_Maquina: token.machineId || '',
-      IP_Redencion: token.redemptionDetails?.ip || '',
-      Dispositivo_Redencion: token.redemptionDetails?.deviceInfo || '',
-      Timestamp_Redencion: formatDate(token.redemptionDetails?.timestamp),
+      IP_Redencion: token.redemptionIp || '',
+      Dispositivo_Redencion: token.redemptionDeviceInfo || '',
+      Timestamp_Redencion: formatDate(token.redemptionTimestamp),
     }));
 
     const workbook = XLSX.utils.book_new();
@@ -108,12 +102,13 @@ async function exportTokens(): Promise<void> {
 
     console.log(`Base de datos exportada exitosamente a: ${filePath}`);
 
-    await mongoose.connection.close();
-    console.log('Conexion a MongoDB cerrada');
+    await prisma.$disconnect();
+    console.log('Conexion a PostgreSQL cerrada');
 
     process.exit(0);
   } catch (error) {
     console.error('Error en la exportacion:', error);
+    await prisma.$disconnect();
     process.exit(1);
   }
 }

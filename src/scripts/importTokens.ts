@@ -3,11 +3,9 @@ import 'dotenv/config';
 
 import * as path from 'path';
 
-import mongoose from 'mongoose';
 import * as XLSX from 'xlsx';
 
-import config from '../config/config';
-import Token, { type IRedemptionDetails } from '../models/tokenModel';
+import prisma from '../lib/prisma';
 import { getFirstDayOfNextMonthAfterMonths } from '../services/tokenService';
 
 interface ExcelRow {
@@ -58,7 +56,9 @@ interface TokenUpdateFields {
   redeemedAt?: Date;
   isRedeemed?: boolean;
   machineId?: string;
-  redemptionDetails?: IRedemptionDetails;
+  redemptionIp?: string;
+  redemptionDeviceInfo?: string;
+  redemptionTimestamp?: Date;
 }
 
 interface TokenCreateData {
@@ -71,7 +71,9 @@ interface TokenCreateData {
   isRedeemed: boolean;
   redeemedAt?: Date;
   machineId?: string;
-  redemptionDetails?: IRedemptionDetails;
+  redemptionIp?: string;
+  redemptionDeviceInfo?: string;
+  redemptionTimestamp?: Date;
 }
 
 function parseDate(dateStr: string | undefined | null): Date | null {
@@ -129,11 +131,6 @@ async function importTokens(): Promise<void> {
   try {
     const scriptsDir = path.join(__dirname, 'data');
     const filePath = path.join(scriptsDir, 'tokens_database.xlsx');
-
-    if (mongoose.connection.readyState !== 1) {
-      await mongoose.connect(config.mongodbURI);
-      console.log('Conectado a MongoDB');
-    }
 
     const workbook = XLSX.readFile(filePath);
     const firstSheetName = workbook.SheetNames[0];
@@ -222,7 +219,7 @@ async function importTokens(): Promise<void> {
         }
 
         // Buscar si el token ya existe
-        const existingToken = await Token.findOne({ token: row.Token });
+        const existingToken = await prisma.token.findUnique({ where: { token: row.Token } });
 
         if (existingToken) {
           // Actualizar token existente
@@ -249,16 +246,20 @@ async function importTokens(): Promise<void> {
           if (idMaquina) {
             updateFields.machineId = idMaquina;
           }
-          if (dispositivoRedencion || ipRedencion) {
-            updateFields.redemptionDetails = {
-              ...(existingToken.redemptionDetails ?? {}),
-              ...(ipRedencion ? { ip: ipRedencion } : {}),
-              ...(dispositivoRedencion ? { deviceInfo: dispositivoRedencion } : {}),
-              ...(redeemedAt ? { timestamp: redeemedAt } : {}),
-            };
+          if (ipRedencion) {
+            updateFields.redemptionIp = ipRedencion;
+          }
+          if (dispositivoRedencion) {
+            updateFields.redemptionDeviceInfo = dispositivoRedencion;
+          }
+          if (redeemedAt) {
+            updateFields.redemptionTimestamp = redeemedAt;
           }
 
-          await Token.updateOne({ token: row.Token }, { $set: updateFields });
+          await prisma.token.update({
+            where: { token: row.Token },
+            data: updateFields,
+          });
 
           results.updated++;
           console.log(`Actualizado token: ${row.Token}`);
@@ -280,15 +281,12 @@ async function importTokens(): Promise<void> {
           }
 
           if (dispositivoRedencion || ipRedencion) {
-            tokenData.redemptionDetails = {
-              ip: ipRedencion || '',
-              deviceInfo: dispositivoRedencion || '',
-              timestamp: redeemedAt ?? new Date(),
-            };
+            tokenData.redemptionIp = ipRedencion || '';
+            tokenData.redemptionDeviceInfo = dispositivoRedencion || '';
+            tokenData.redemptionTimestamp = redeemedAt ?? new Date();
           }
 
-          const newToken = new Token(tokenData);
-          await newToken.save();
+          await prisma.token.create({ data: tokenData });
 
           results.created++;
           console.log(`Creado nuevo token: ${row.Token}`);
@@ -309,15 +307,13 @@ async function importTokens(): Promise<void> {
       results.errors.forEach((err) => console.log(`- ${err}`));
     }
 
-    await mongoose.connection.close();
-    console.log('\nConexion a MongoDB cerrada');
+    await prisma.$disconnect();
+    console.log('\nConexion a PostgreSQL cerrada');
 
     process.exit(0);
   } catch (error) {
     console.error('Error en la importacion:', error);
-    if (mongoose.connection.readyState === 1) {
-      await mongoose.connection.close();
-    }
+    await prisma.$disconnect();
     process.exit(1);
   }
 }
