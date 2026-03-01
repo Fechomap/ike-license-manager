@@ -44,7 +44,7 @@ interface TokenWithShareLinks {
   shareLinks: ShareLinks;
 }
 
-interface TokenWithRemainingDays {
+export interface TokenWithRemainingDays {
   id: string;
   token: string;
   email: string;
@@ -72,6 +72,7 @@ export interface TokenStatusResult {
   message: string;
   reason?: string;
   graceDaysRemaining?: number;
+  daysUntilExpiration?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -79,6 +80,7 @@ export interface TokenStatusResult {
 // ---------------------------------------------------------------------------
 
 const GRACE_PERIOD_DAYS = 5;
+const EXPIRING_SOON_DAYS = 5;
 
 // ---------------------------------------------------------------------------
 // Helpers internos
@@ -238,6 +240,18 @@ export async function checkTokenStatus(token: string): Promise<TokenStatusResult
       expiresAt: expiresAtISO,
       message: 'Token suspendido',
       reason: 'Periodo de gracia vencido sin pago',
+    };
+  }
+
+  // Verificar si está próximo a expirar
+  const daysUntilExpiration = calculateRemainingDays(tokenRecord.expiresAt);
+  if (daysUntilExpiration <= EXPIRING_SOON_DAYS) {
+    return {
+      valid: true,
+      status: 'expiring_soon',
+      expiresAt: expiresAtISO,
+      message: 'Token próximo a expirar',
+      daysUntilExpiration,
     };
   }
 
@@ -435,6 +449,67 @@ export async function getExpiredTokens(): Promise<Token[]> {
     },
     orderBy: { expiresAt: 'asc' },
   });
+}
+
+// ---------------------------------------------------------------------------
+// Filtrado genérico de tokens
+// ---------------------------------------------------------------------------
+
+export type TokenFilter =
+  | 'active'
+  | 'expiring_soon'
+  | 'expired'
+  | 'suspended'
+  | 'cancelled'
+  | 'all';
+
+export async function getTokensByFilter(filter: TokenFilter): Promise<TokenWithRemainingDays[]> {
+  const now = new Date();
+  const soonDate = new Date(now.getTime() + EXPIRING_SOON_DAYS * 24 * 60 * 60 * 1000);
+
+  let tokens: Token[];
+
+  switch (filter) {
+    case 'active':
+      tokens = await prisma.token.findMany({
+        where: { status: TokenStatus.active, expiresAt: { gt: soonDate } },
+        orderBy: { expiresAt: 'asc' },
+      });
+      break;
+    case 'expiring_soon':
+      tokens = await prisma.token.findMany({
+        where: { status: TokenStatus.active, expiresAt: { gt: now, lte: soonDate } },
+        orderBy: { expiresAt: 'asc' },
+      });
+      break;
+    case 'expired':
+      tokens = await prisma.token.findMany({
+        where: { status: TokenStatus.active, expiresAt: { lt: now } },
+        orderBy: { expiresAt: 'asc' },
+      });
+      break;
+    case 'suspended':
+      tokens = await prisma.token.findMany({
+        where: { status: TokenStatus.suspended },
+        orderBy: { createdAt: 'desc' },
+      });
+      break;
+    case 'cancelled':
+      tokens = await prisma.token.findMany({
+        where: { status: TokenStatus.cancelled },
+        orderBy: { createdAt: 'desc' },
+      });
+      break;
+    case 'all':
+      tokens = await prisma.token.findMany({ orderBy: { createdAt: 'desc' } });
+      break;
+  }
+
+  return tokens.map((token) => ({
+    ...token,
+    redemptionDetails: getRedemptionDetails(token),
+    remainingDays: calculateRemainingDays(token.expiresAt),
+  }));
 }
 
 /**

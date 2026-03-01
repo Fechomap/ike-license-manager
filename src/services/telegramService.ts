@@ -43,12 +43,20 @@ function statusLabel(status: string): string {
 const MAIN_KEYBOARD: TelegramBot.SendMessageOptions['reply_markup'] = {
   keyboard: [
     [{ text: '🎫 Generar Token' }, { text: '📋 Listar Tokens' }],
-    [{ text: '⚠️ Por Caducar' }, { text: '❌ Expirados' }],
     [{ text: '📊 Exportar Excel' }],
   ],
   resize_keyboard: true,
   one_time_keyboard: false,
   is_persistent: true,
+};
+
+const FILTER_LABELS: Record<string, string> = {
+  active: '🟢 Activos',
+  expiring_soon: '⏳ Por Caducar',
+  expired: '🔴 Expirados',
+  suspended: '🟡 Suspendidos',
+  cancelled: '❌ Cancelados',
+  all: '📋 Todos',
 };
 
 // ---------------------------------------------------------------------------
@@ -82,9 +90,7 @@ class TelegramService {
       await this.bot.setMyCommands([
         { command: 'start', description: '🏠 Mostrar menú principal' },
         { command: 'generar_token', description: '🎫 Generar un nuevo token' },
-        { command: 'listar_tokens', description: '📋 Listar todos los tokens' },
-        { command: 'tokens_caducando', description: '⚠️ Tokens próximos a vencer' },
-        { command: 'tokens_expirados', description: '❌ Tokens expirados' },
+        { command: 'listar_tokens', description: '📋 Listar tokens (con filtros)' },
         { command: 'exportar_excel', description: '📊 Exportar base de datos a Excel' },
       ]);
     } catch (error: unknown) {
@@ -141,12 +147,6 @@ class TelegramService {
     this.bot.onText(/📋 Listar Tokens/, (msg: TelegramBot.Message) => {
       void this.handleListTokens(msg);
     });
-    this.bot.onText(/⚠️ Por Caducar/, (msg: TelegramBot.Message) => {
-      void this.handleTokensExpiringSoon(msg);
-    });
-    this.bot.onText(/❌ Expirados/, (msg: TelegramBot.Message) => {
-      void this.handleExpiredTokens(msg);
-    });
     this.bot.onText(/📊 Exportar Excel/, (msg: TelegramBot.Message) => {
       void this.handleExportExcel(msg);
     });
@@ -162,28 +162,52 @@ class TelegramService {
   }
 
   async handleListTokens(msg: TelegramBot.Message): Promise<void> {
+    const filterKeys = Object.keys(FILTER_LABELS) as tokenService.TokenFilter[];
+    const buttons: TelegramBot.InlineKeyboardButton[][] = [];
+
+    // 2 filtros por fila
+    for (let i = 0; i < filterKeys.length; i += 2) {
+      const row: TelegramBot.InlineKeyboardButton[] = filterKeys.slice(i, i + 2).map((key) => ({
+        text: FILTER_LABELS[key] ?? key,
+        callback_data: `filter:${key}`,
+      }));
+      buttons.push(row);
+    }
+
+    await this.bot.sendMessage(msg.chat.id, '📋 Selecciona un filtro para ver tokens:', {
+      reply_markup: { inline_keyboard: buttons },
+    });
+  }
+
+  async handleFilteredTokenList(
+    chatId: number,
+    messageId: number,
+    filter: tokenService.TokenFilter,
+  ): Promise<void> {
     try {
-      // Notificamos que estamos procesando
-      await this.bot.sendMessage(msg.chat.id, '⏳ Obteniendo lista de tokens...');
+      const label = FILTER_LABELS[filter] ?? filter;
 
-      // Obtenemos los tokens
-      const tokens = await tokenService.getAllTokens();
+      await this.bot.editMessageText(`⏳ Buscando tokens: ${label}...`, {
+        chat_id: chatId,
+        message_id: messageId,
+      });
 
-      if (!tokens || tokens.length === 0) {
-        await this.bot.sendMessage(msg.chat.id, '📋 No hay tokens para mostrar.');
+      const tokens = await tokenService.getTokensByFilter(filter);
+
+      if (tokens.length === 0) {
+        await this.bot.editMessageText(`${label} — No se encontraron tokens.`, {
+          chat_id: chatId,
+          message_id: messageId,
+        });
         return;
       }
 
-      await this.bot.sendMessage(
-        msg.chat.id,
-        `📋 Encontrados ${tokens.length} tokens. Procesando lista...`,
+      await this.bot.editMessageText(
+        `${label} — ${tokens.length} token${tokens.length === 1 ? '' : 's'}:`,
+        { chat_id: chatId, message_id: messageId },
       );
 
       for (const token of tokens) {
-        if (!token || !token.token) {
-          continue;
-        }
-
         const redeemStatus = token.isRedeemed ? '✅ Canjeado' : '⏳ No canjeado';
         const days = token.remainingDays || 0;
 
@@ -196,26 +220,35 @@ class TelegramService {
           `⏰ Días restantes: ${days}`;
 
         const buttons: TelegramBot.InlineKeyboardButton[][] = [];
-        if (token.status === TokenStatus.active) {
+
+        if (token.status === TokenStatus.active && token.remainingDays > 0) {
           buttons.push([
             { text: '🚫 Suspender', callback_data: `suspend:${token.token}` },
             { text: '❌ Cancelar', callback_data: `cancel:${token.token}` },
           ]);
+        } else if (token.status === TokenStatus.active && token.remainingDays <= 0) {
+          // Expirado pero aún con status active
+          buttons.push([
+            { text: '🔄 Renovar', callback_data: `renew:${token.token}` },
+            { text: '🗑️ Borrar', callback_data: `delete:${token.token}` },
+          ]);
         } else {
-          buttons.push([{ text: '✅ Reactivar', callback_data: `reactivate:${token.token}` }]);
+          // Suspended / Cancelled
+          buttons.push([
+            { text: '✅ Reactivar', callback_data: `reactivate:${token.token}` },
+            { text: '🗑️ Borrar', callback_data: `delete:${token.token}` },
+          ]);
         }
 
-        await this.bot.sendMessage(msg.chat.id, tokenMessage, {
+        await this.bot.sendMessage(chatId, tokenMessage, {
           reply_markup: { inline_keyboard: buttons },
         });
 
         await this.sleep(300);
       }
-
-      await this.bot.sendMessage(msg.chat.id, '✅ Lista completada');
     } catch (error: unknown) {
-      console.error('Error al listar tokens:', error instanceof Error ? error.message : error);
-      await this.bot.sendMessage(msg.chat.id, '❌ Error al obtener la lista de tokens');
+      console.error('Error al filtrar tokens:', error instanceof Error ? error.message : error);
+      await this.bot.sendMessage(chatId, '❌ Error al obtener la lista de tokens');
     }
   }
 
@@ -340,6 +373,25 @@ class TelegramService {
 
     try {
       switch (action) {
+        case 'filter': {
+          if (!tokenId) {
+            break;
+          }
+          const validFilters: tokenService.TokenFilter[] = [
+            'active',
+            'expiring_soon',
+            'expired',
+            'suspended',
+            'cancelled',
+            'all',
+          ];
+          const filter = tokenId as tokenService.TokenFilter;
+          if (validFilters.includes(filter)) {
+            await this.handleFilteredTokenList(chatId, messageId, filter);
+          }
+          break;
+        }
+
         case 'renew':
           // Mostrar opciones de renovación por meses
           await this.bot.editMessageReplyMarkup(
@@ -491,8 +543,6 @@ class TelegramService {
         text.startsWith('/') ||
         text.includes('🎫 Generar Token') ||
         text.includes('📋 Listar Tokens') ||
-        text.includes('⚠️ Por Caducar') ||
-        text.includes('❌ Expirados') ||
         text.includes('📊 Exportar Excel');
       if (!isHandled) {
         await this.bot.sendMessage(chatId, '👋 Usa los botones del menú para continuar.', {
