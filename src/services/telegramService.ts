@@ -17,8 +17,10 @@ interface UserData {
 }
 
 interface UserState {
-  step: 'email' | 'name' | 'phone';
+  step: 'email' | 'name' | 'phone' | 'payment_amount' | 'payment_date';
   data: Partial<UserData>;
+  paymentToken?: string;
+  paymentAmount?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -222,6 +224,7 @@ class TelegramService {
         const buttons: TelegramBot.InlineKeyboardButton[][] = [];
 
         if (token.status === TokenStatus.active && token.remainingDays > 0) {
+          buttons.push([{ text: '💰 Registrar Pago', callback_data: `pay:${token.token}` }]);
           buttons.push([
             { text: '🚫 Suspender', callback_data: `suspend:${token.token}` },
             { text: '❌ Cancelar', callback_data: `cancel:${token.token}` },
@@ -229,7 +232,7 @@ class TelegramService {
         } else if (token.status === TokenStatus.active && token.remainingDays <= 0) {
           // Expirado pero aún con status active
           buttons.push([
-            { text: '🔄 Renovar', callback_data: `renew:${token.token}` },
+            { text: '💰 Registrar Pago', callback_data: `pay:${token.token}` },
             { text: '🗑️ Borrar', callback_data: `delete:${token.token}` },
           ]);
         } else {
@@ -308,7 +311,7 @@ class TelegramService {
 
         const buttons: TelegramBot.InlineKeyboardButton[][] = [
           [
-            { text: '🔄 Renovar', callback_data: `renew:${token.token}` },
+            { text: '💰 Registrar Pago', callback_data: `pay:${token.token}` },
             { text: '🗑️ Borrar', callback_data: `delete:${token.token}` },
           ],
         ];
@@ -362,7 +365,6 @@ class TelegramService {
     const parts = data.split(':');
     const action = parts[0];
     const tokenId = parts[1];
-    const months = parts[2];
 
     const chatId = query.message?.chat.id;
     const messageId = query.message?.message_id;
@@ -392,44 +394,22 @@ class TelegramService {
           break;
         }
 
-        case 'renew':
-          // Mostrar opciones de renovación por meses
-          await this.bot.editMessageReplyMarkup(
-            {
-              inline_keyboard: [
-                [
-                  { text: '1 Mes', callback_data: `extend:${tokenId}:1` },
-                  { text: '2 Meses', callback_data: `extend:${tokenId}:2` },
-                  { text: '3 Meses', callback_data: `extend:${tokenId}:3` },
-                ],
-              ],
-            },
-            {
-              chat_id: chatId,
-              message_id: messageId,
-            },
-          );
-          break;
-
-        case 'extend': {
-          if (!tokenId || !months) {
+        case 'pay': {
+          if (!tokenId) {
             break;
           }
-          const updatedToken = await tokenService.renewToken(tokenId, parseInt(months, 10));
-
-          const newExpiryDate = updatedToken.expiresAt.toLocaleDateString('es-MX', {
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric',
+          this.userStates.set(chatId, {
+            step: 'payment_amount',
+            data: {},
+            paymentToken: tokenId,
           });
-
-          await this.bot.editMessageText(
-            `✅ Token renovado por ${months} ${months === '1' ? 'mes' : 'meses'}.\n` +
-              `Nueva fecha de expiración: ${newExpiryDate}`,
-            {
-              chat_id: chatId,
-              message_id: messageId,
-            },
+          await this.bot.sendMessage(
+            chatId,
+            `💰 *Registro de pago*\n\n` +
+              `Token: \`${tokenId}\`\n` +
+              `Precio por mes: $${tokenService.PRICE_PER_MONTH_MXN.toLocaleString()} MXN\n\n` +
+              `Ingresa el monto del pago (múltiplo de $${tokenService.PRICE_PER_MONTH_MXN.toLocaleString()}):`,
+            { parse_mode: 'Markdown' },
           );
           break;
         }
@@ -600,6 +580,100 @@ class TelegramService {
           );
         }
         break;
+
+      case 'payment_amount': {
+        const amount = parseInt(text.replace(/[,$.\s]/g, ''), 10);
+        if (isNaN(amount) || amount <= 0 || amount % tokenService.PRICE_PER_MONTH_MXN !== 0) {
+          this.userStates.delete(chatId);
+          const price = tokenService.PRICE_PER_MONTH_MXN.toLocaleString();
+          await this.bot.sendMessage(
+            chatId,
+            `❌ El monto debe ser un múltiplo positivo de $${price} MXN.\n` +
+              `Ejemplos: $${price}, $${(tokenService.PRICE_PER_MONTH_MXN * 2).toLocaleString()}, $${(tokenService.PRICE_PER_MONTH_MXN * 3).toLocaleString()}...`,
+            { reply_markup: MAIN_KEYBOARD },
+          );
+          break;
+        }
+        const months = amount / tokenService.PRICE_PER_MONTH_MXN;
+        userState.paymentAmount = amount;
+        userState.step = 'payment_date';
+        await this.bot.sendMessage(
+          chatId,
+          `💵 Monto: $${amount.toLocaleString()} MXN (${months} ${months === 1 ? 'mes' : 'meses'})\n\n` +
+            `📅 Ingresa la fecha del pago:\n` +
+            `• Formato: DD/MM/AAAA (ej: 01/03/2026)\n` +
+            `• Escribe "hoy" para usar la fecha actual`,
+        );
+        break;
+      }
+
+      case 'payment_date': {
+        let paidAt: Date;
+        const trimmed = text.trim().toLowerCase();
+
+        if (trimmed === 'hoy') {
+          paidAt = new Date();
+        } else {
+          const match = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+          if (!match) {
+            this.userStates.delete(chatId);
+            await this.bot.sendMessage(
+              chatId,
+              '❌ Formato de fecha inválido. Usa DD/MM/AAAA o "hoy".',
+              { reply_markup: MAIN_KEYBOARD },
+            );
+            break;
+          }
+          const day = match[1] as string;
+          const month = match[2] as string;
+          const year = match[3] as string;
+          paidAt = new Date(parseInt(year, 10), parseInt(month, 10) - 1, parseInt(day, 10));
+          if (isNaN(paidAt.getTime())) {
+            this.userStates.delete(chatId);
+            await this.bot.sendMessage(chatId, '❌ Fecha inválida.', {
+              reply_markup: MAIN_KEYBOARD,
+            });
+            break;
+          }
+        }
+
+        const payToken = userState.paymentToken ?? '';
+        const payAmount = userState.paymentAmount ?? 0;
+
+        try {
+          const result = await tokenService.registerPayment(payToken, payAmount, paidAt);
+
+          const dateStr = paidAt.toLocaleDateString('es-MX', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+          });
+          const expiryStr = result.newExpiresAt.toLocaleDateString('es-MX', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+          });
+
+          await this.bot.sendMessage(
+            chatId,
+            `✅ *Pago registrado exitosamente*\n\n` +
+              `🔑 Token: \`${payToken}\`\n` +
+              `💵 Monto: $${payAmount.toLocaleString()} MXN\n` +
+              `📅 Fecha de pago: ${dateStr}\n` +
+              `🗓️ Meses: ${result.months}\n` +
+              `📆 Nueva expiración: ${expiryStr}`,
+            { parse_mode: 'Markdown', reply_markup: MAIN_KEYBOARD },
+          );
+        } catch (error: unknown) {
+          const msg = error instanceof Error ? error.message : 'Error desconocido';
+          await this.bot.sendMessage(chatId, `❌ Error al registrar pago: ${msg}`, {
+            reply_markup: MAIN_KEYBOARD,
+          });
+        }
+
+        this.userStates.delete(chatId);
+        break;
+      }
     }
   }
 

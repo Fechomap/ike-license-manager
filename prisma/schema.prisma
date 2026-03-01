@@ -30,9 +30,25 @@ model Token {
   redemptionTimestamp  DateTime?
   status               TokenStatus @default(active)
   statusReason         String?
+  payments             Payment[]
 
   @@index([expiresAt])
   @@index([status])
   @@index([isRedeemed])
   @@map("tokens")
+}
+
+model Payment {
+  id        String   @id @default(cuid())
+  amount    Float
+  months    Int
+  paidAt    DateTime
+  createdAt DateTime @default(now())
+  note      String?
+  tokenId   String
+  token     Token    @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+
+  @@index([tokenId])
+  @@index([paidAt])
+  @@map("payments")
 }

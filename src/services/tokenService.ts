@@ -3,7 +3,7 @@ import crypto from 'crypto';
 
 import * as XLSX from 'xlsx';
 
-import type { Token } from '../generated/prisma/client';
+import type { Payment, Token } from '../generated/prisma/client';
 import { TokenStatus } from '../generated/prisma/enums';
 import prisma from '../lib/prisma';
 import { getRedemptionDetails } from '../models/tokenModel';
@@ -75,12 +75,20 @@ export interface TokenStatusResult {
   daysUntilExpiration?: number;
 }
 
+export interface PaymentResult {
+  payment: Payment;
+  token: Token;
+  months: number;
+  newExpiresAt: Date;
+}
+
 // ---------------------------------------------------------------------------
 // Constantes
 // ---------------------------------------------------------------------------
 
 const GRACE_PERIOD_DAYS = 5;
 const EXPIRING_SOON_DAYS = 5;
+export const PRICE_PER_MONTH_MXN = 1500;
 
 // ---------------------------------------------------------------------------
 // Helpers internos
@@ -542,24 +550,51 @@ export async function updateTokenStatus(
 }
 
 /**
- * Renovar token por meses.
+ * Registra un pago y renueva el token automáticamente.
+ * El monto debe ser múltiplo de $1,500 MXN.
+ * Usa transacción atómica para crear Payment + actualizar Token.
  */
-export async function renewToken(tokenId: string, months: number): Promise<Token> {
-  const token = await prisma.token.findUnique({ where: { token: tokenId } });
-  if (!token) {
+export async function registerPayment(
+  tokenValue: string,
+  amount: number,
+  paidAt: Date,
+  note?: string,
+): Promise<PaymentResult> {
+  if (amount <= 0 || amount % PRICE_PER_MONTH_MXN !== 0) {
+    throw new Error(
+      `El monto debe ser un múltiplo positivo de $${PRICE_PER_MONTH_MXN.toLocaleString()} MXN`,
+    );
+  }
+
+  const months = amount / PRICE_PER_MONTH_MXN;
+
+  const tokenRecord = await prisma.token.findUnique({ where: { token: tokenValue } });
+  if (!tokenRecord) {
     throw new Error('Token no encontrado');
   }
 
-  // Siempre usar la fecha actual como base y establecer al primer día del mes siguiente
   const now = new Date();
-  const newExpiryDate = getFirstDayOfNextMonthAfterMonths(now, months);
+  const newExpiresAt = getFirstDayOfNextMonthAfterMonths(now, months);
 
-  return prisma.token.update({
-    where: { token: tokenId },
-    data: {
-      expiresAt: newExpiryDate,
-      status: TokenStatus.active,
-      statusReason: null,
-    },
-  });
+  const [payment, updatedToken] = await prisma.$transaction([
+    prisma.payment.create({
+      data: {
+        amount,
+        months,
+        paidAt,
+        note: note ?? null,
+        tokenId: tokenRecord.id,
+      },
+    }),
+    prisma.token.update({
+      where: { id: tokenRecord.id },
+      data: {
+        expiresAt: newExpiresAt,
+        status: TokenStatus.active,
+        statusReason: null,
+      },
+    }),
+  ]);
+
+  return { payment, token: updatedToken, months, newExpiresAt };
 }
