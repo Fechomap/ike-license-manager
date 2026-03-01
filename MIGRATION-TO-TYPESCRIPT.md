@@ -311,6 +311,24 @@ interface UserState {
 
 ---
 
+## Estrategia de Autenticacion API
+
+Los endpoints de la API REST siguen una estrategia mixta: los endpoints consumidos maquina-a-servidor por la app de licencias (EXPEDIENTES-IKE) son publicos, mientras que los endpoints administrativos requieren JWT.
+
+| Endpoint | Metodo | Auth | Uso |
+|----------|--------|------|-----|
+| `/api/status` | GET | Publico | Health check |
+| `/api/login` | POST | Publico (body: `adminKey`) | Obtener JWT admin (24h) |
+| `/api/validate` | POST | Publico | Validar/redimir token (maquina-a-servidor) |
+| `/api/check-validity/:token` | GET | Publico | Verificar validez sin redimir (maquina-a-servidor) |
+| `/api/tokens` | GET | JWT (`Authorization: Bearer <token>`) | Listar tokens (admin) |
+
+El middleware `authenticate` (`src/middleware/authMiddleware.ts`) verifica el header `Authorization: Bearer <JWT>` y decodifica el token usando `authService.verifyToken()`. Solo se aplica a los endpoints marcados como protegidos.
+
+`JWT_SECRET` se carga con `getLazyRequiredEnv` en `config.ts` para que los scripts standalone (export/import/delete) no fallen por falta de esta variable.
+
+---
+
 ## Grafo de Dependencias Internas
 
 ```

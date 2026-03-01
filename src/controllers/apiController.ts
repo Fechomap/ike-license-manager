@@ -2,7 +2,7 @@
 import type { Request, Response } from 'express';
 
 import config from '../config/config';
-import telegramService from '../services/telegramService';
+import { generateToken as generateJwt } from '../services/authService';
 import * as tokenService from '../services/tokenService';
 
 // ---------------------------------------------------------------------------
@@ -69,8 +69,6 @@ export async function getAllTokens(req: Request, res: Response): Promise<void> {
     const tokens = await tokenService.getAllTokens(skip, limit);
     const totalTokens = await tokenService.getTotalTokens();
 
-    await sendTokensToTelegram(tokens);
-
     const response = {
       tokens,
       currentPage: page,
@@ -88,47 +86,27 @@ export async function getAllTokens(req: Request, res: Response): Promise<void> {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Helpers internos
-// ---------------------------------------------------------------------------
+export async function login(req: Request, res: Response): Promise<void> {
+  try {
+    const { adminKey } = req.body as { adminKey?: string };
 
-interface TokenSummary {
-  token: string;
-  name: string;
-  email: string;
-  isRedeemed: boolean;
-  remainingDays: number;
-}
+    // Usar ADMIN_API_KEY, con fallback temporal a ADMIN_CHAT_ID (deprecated)
+    const validKey = config.adminApiKey || config.adminChatId;
 
-/**
- * Envia la lista de tokens al chat de Telegram configurado.
- * Si el mensaje sobrepasa los 4096 caracteres de Telegram,
- * se dividira automaticamente en chunks para evitar el error "message is too long".
- */
-async function sendTokensToTelegram(tokens: TokenSummary[]): Promise<void> {
-  if (!config.adminChatId) {
-    console.warn('ADMIN_CHAT_ID no configurado, omitiendo envio a Telegram');
-    return;
-  }
+    if (!adminKey || !validKey || adminKey !== validKey) {
+      res.status(401).json({ success: false, message: 'Credenciales invalidas' });
+      return;
+    }
 
-  let message = '\u{1f4cb} *Lista de tokens:*\n\n';
-  for (const token of tokens) {
-    message +=
-      `\u{1f511} *Token:* ${token.token}\n` +
-      `\u{1f464} *Usuario:* ${token.name}\n` +
-      `\u{1f4e7} *Email:* ${token.email}\n` +
-      `\u{1f4c5} *Estado:* ${token.isRedeemed ? 'Canjeado' : 'No canjeado'}\n` +
-      `\u{23f0} *Dias restantes:* ${token.remainingDays}\n\n`;
-  }
+    if (!config.adminApiKey && config.adminChatId) {
+      console.warn('⚠️ Usando ADMIN_CHAT_ID para login (deprecated). Configure ADMIN_API_KEY.');
+    }
 
-  const chunkSize = 4000;
-  let startIndex = 0;
-
-  while (startIndex < message.length) {
-    const messageChunk = message.slice(startIndex, startIndex + chunkSize);
-    await telegramService.bot.sendMessage(config.adminChatId, messageChunk, {
-      parse_mode: 'Markdown',
-    });
-    startIndex += chunkSize;
+    const token = generateJwt({ role: 'admin' }, '24h');
+    res.json({ success: true, token });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('Error en login:', message);
+    res.status(500).json({ success: false, message: 'Error al generar token' });
   }
 }

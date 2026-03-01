@@ -2,7 +2,6 @@
 import TelegramBot from 'node-telegram-bot-api';
 
 import config from '../config/config';
-import Token from '../models/tokenModel';
 
 import * as tokenService from './tokenService';
 
@@ -30,6 +29,10 @@ class TelegramService {
   userStates: Map<number, UserState>;
 
   constructor() {
+    if (!config.telegramToken) {
+      throw new Error('TELEGRAM_TOKEN es requerido para iniciar el servicio de Telegram');
+    }
+
     if (config.isProduction) {
       // Modo Webhook para Railway
       this.bot = new TelegramBot(config.telegramToken);
@@ -289,16 +292,24 @@ class TelegramService {
           break;
         }
 
-        case 'delete':
+        case 'delete': {
           if (!tokenId) {
             break;
           }
-          await Token.deleteOne({ token: tokenId });
-          await this.bot.editMessageText('🗑️ Token eliminado permanentemente.', {
-            chat_id: chatId,
-            message_id: messageId,
-          });
+          const deleted = await tokenService.deleteToken(tokenId);
+          if (deleted) {
+            await this.bot.editMessageText('🗑️ Token eliminado permanentemente.', {
+              chat_id: chatId,
+              message_id: messageId,
+            });
+          } else {
+            await this.bot.editMessageText('⚠️ Token no encontrado o ya fue eliminado.', {
+              chat_id: chatId,
+              message_id: messageId,
+            });
+          }
           break;
+        }
       }
     } catch (error: unknown) {
       console.error('Error en callback handler:', error instanceof Error ? error.message : error);

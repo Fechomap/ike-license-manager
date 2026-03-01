@@ -1,26 +1,26 @@
 # IKE License Manager
 
-Sistema de gestión de licencias con bot de Telegram y API REST para la validación y administración de tokens.
+Sistema de gestion de licencias con bot de Telegram y API REST para la validacion y administracion de tokens. Proyecto TypeScript desplegado en Railway con MongoDB Atlas.
 
-## Características Principales
+## Caracteristicas Principales
 
-- 🔑 Generación y gestión de tokens de licencia
-- 🤖 Bot de Telegram para administración
-- 🌐 API REST para validación de licencias
-- 📊 Sistema de importación/exportación de datos
-- 📱 Integración con WhatsApp y Gmail para compartir tokens
-- 🔒 Sistema de redención única por token
-- 💻 Vinculación de licencias a máquinas específicas
+- Generacion y gestion de tokens de licencia
+- Bot de Telegram para administracion
+- API REST para validacion de licencias
+- Sistema de importacion/exportacion de datos (Excel)
+- Sistema de redencion unica por token
+- Vinculacion de licencias a maquinas especificas
+- Autenticacion JWT para endpoints administrativos
 
 ## Requisitos Previos
 
-- Node.js (v14 o superior)
+- Node.js (v16 o superior)
 - MongoDB
 - Token de Bot de Telegram
 - Variables de entorno configuradas
 - Cuenta en Railway (para deployment)
 
-## Instalación
+## Instalacion
 
 1. Clonar el repositorio:
 ```bash
@@ -44,64 +44,115 @@ PORT=3000
 MONGODB_URI=mongodb://localhost/ike-license
 TELEGRAM_TOKEN=your_telegram_bot_token
 JWT_SECRET=your_jwt_secret
-ADMIN_CHAT_ID=your_admin_chat_id
+ADMIN_CHAT_ID=your_admin_chat_id          # ID del chat de Telegram del administrador (usado por el bot)
+ADMIN_API_KEY=tu_clave_admin_segura_aqui   # Clave para POST /login (fallback temporal: ADMIN_CHAT_ID)
 NODE_ENV=production # Para entorno Railway
-RAILWAY_ENVIRONMENT_NAME=production # Configuración de Railway
+RAILWAY_ENVIRONMENT_NAME=production # Configuracion de Railway
 RAILWAY_PUBLIC_DOMAIN=tu-dominio.railway.app # Solo para Railway
+```
+
+## Comandos
+
+```bash
+npm run dev        # Desarrollo con hot-reload (tsx watch src/app.ts)
+npm run build      # Compila TypeScript a dist/ (tsc)
+npm start          # Inicia el servidor compilado (node dist/app.js)
+npm run typecheck  # Verificacion de tipos (tsc --noEmit)
+npm run lint       # Lint con ESLint
+npm run format     # Formateo con Prettier
+npm run check      # Gate de calidad: typecheck + lint + format:check
+```
+
+Scripts de datos (ejecutar directamente):
+```bash
+npx tsx src/scripts/exportTokens.ts   # Exporta tokens a Excel
+npx tsx src/scripts/importTokens.ts   # Importa tokens desde Excel
+npx tsx src/scripts/deleteDatabase.ts # Elimina la base de datos
 ```
 
 ## Deployment en Railway
 
-### Configuración inicial
+### Configuracion inicial
 
 1. Conecta tu repositorio a Railway
 2. Configura las variables de entorno:
-   - `MONGODB_URI`: Tu cadena de conexión a MongoDB
+   - `MONGODB_URI`: Tu cadena de conexion a MongoDB
    - `TELEGRAM_TOKEN`: Token de tu bot de Telegram
    - `JWT_SECRET`: Clave secreta para JWT
-   - `ADMIN_CHAT_ID`: ID del chat de administración
+   - `ADMIN_CHAT_ID`: ID del chat de Telegram del administrador (usado por el bot)
+   - `ADMIN_API_KEY`: Clave para autenticacion API via `POST /login`
    - `NODE_ENV`: production
 
-3. Railway generará automáticamente:
-   - `RAILWAY_PUBLIC_DOMAIN`: Dominio público de tu aplicación
+3. Railway generara automaticamente:
+   - `RAILWAY_PUBLIC_DOMAIN`: Dominio publico de tu aplicacion
    - `RAILWAY_ENVIRONMENT_NAME`: Nombre del entorno
 
-### Verificación del deployment
+4. Build y start commands:
+   - **Build**: `npm install && npm run build`
+   - **Start**: `npm start` (ejecuta `node dist/app.js`)
 
-1. Verifica que la aplicación se despliega correctamente:
+### Verificacion del deployment
+
+1. Verifica que la aplicacion se despliega correctamente:
 ```bash
 curl https://tu-dominio.railway.app/api/status
 ```
 
-2. Configura el webhook del bot de Telegram (se hace automáticamente al iniciar)
+2. El webhook del bot de Telegram se configura automaticamente al iniciar.
 
-## Uso
+## API Endpoints
 
-### Iniciar el Servidor Local
-
-```bash
-npm start
-```
-
-### Comandos del Bot de Telegram
-
-- `/start` - Iniciar el bot
-- `/help` - Mostrar comandos disponibles
-- `/generar_token` - Generar nuevo token
-- `/listar_tokens` - Listar tokens existentes
-- `/tokens_caducando` - Mostrar tokens próximos a expirar
-- `/tokens_expirados` - Listar tokens expirados
-
-### API Endpoints
-
-#### Base URL
+### Base URL
 ```
 https://tu-dominio.railway.app/api
 ```
 
-#### Endpoints Principales
+### Autenticacion
 
-1. **Validar Token**
+Los endpoints de la API siguen una estrategia mixta:
+- **Endpoints publicos**: consumidos maquina-a-servidor por la app de licencias, no requieren autenticacion.
+- **Endpoints administrativos**: requieren un JWT obtenido via `POST /api/login`.
+
+Para obtener un JWT:
+```bash
+curl -X POST https://tu-dominio.railway.app/api/login \
+  -H "Content-Type: application/json" \
+  -d '{"adminKey": "tu_admin_api_key"}'
+```
+
+> **Nota:** `adminKey` se valida contra `ADMIN_API_KEY`. Si `ADMIN_API_KEY` no esta configurada, se usa `ADMIN_CHAT_ID` como fallback temporal (deprecated).
+
+Respuesta:
+```json
+{
+  "success": true,
+  "token": "eyJhbGciOiJIUzI1NiIs..."
+}
+```
+
+El token tiene una validez de 24 horas. Usarlo en endpoints protegidos con el header:
+```
+Authorization: Bearer <token>
+```
+
+### Endpoints
+
+1. **Estado del Servicio** (publico)
+```http
+GET /status
+```
+
+2. **Login Admin** (publico)
+```http
+POST /login
+Content-Type: application/json
+
+{
+    "adminKey": "tu_admin_api_key"
+}
+```
+
+3. **Validar Token** (publico)
 ```http
 POST /validate
 Content-Type: application/json
@@ -113,29 +164,25 @@ Content-Type: application/json
 }
 ```
 
-2. **Estado del Servicio**
+4. **Verificar Validez** (publico)
 ```http
-GET /status
+GET /check-validity/:token
 ```
 
-3. **Listar Tokens**
+5. **Listar Tokens** (protegido, requiere JWT)
 ```http
-GET /tokens
+GET /tokens?page=1
+Authorization: Bearer <token>
 ```
 
-### Scripts de Administración
+## Comandos del Bot de Telegram
 
-#### Exportar Base de Datos
-```bash
-node src/scripts/exportTokens.js
-```
-Genera un archivo Excel con todos los tokens en `src/scripts/data/tokens_database.xlsx`
-
-#### Importar/Actualizar Base de Datos
-```bash
-node src/scripts/importTokens.js
-```
-Lee el archivo `tokens_database.xlsx` y actualiza los registros en la base de datos
+- `/start` - Iniciar el bot
+- `/help` - Mostrar comandos disponibles
+- `/generar_token` - Generar nuevo token
+- `/listar_tokens` - Listar tokens existentes
+- `/tokens_caducando` - Mostrar tokens proximos a expirar
+- `/tokens_expirados` - Listar tokens expirados
 
 ## Estructura del Proyecto
 
@@ -145,106 +192,79 @@ IKE-LICENSE-MANAGER/
 │   └── api_documentation.md
 ├── src/
 │   ├── config/
-│   │   ├── config.js
-│   │   └── database.js
+│   │   ├── config.ts
+│   │   └── database.ts
 │   ├── controllers/
-│   │   ├── apiController.js
-│   │   └── telegramController.js
+│   │   └── apiController.ts
+│   ├── middleware/
+│   │   └── authMiddleware.ts
 │   ├── models/
-│   │   └── tokenModel.js
+│   │   └── tokenModel.ts
 │   ├── routes/
-│   │   ├── apiRoutes.js
-│   │   └── telegramRoutes.js
+│   │   └── apiRoutes.ts
 │   ├── services/
-│   │   ├── authService.js
-│   │   ├── telegramService.js
-│   │   └── tokenService.js
-│   └── utils/
-│       └── helper.js
-└── app.js
+│   │   ├── authService.ts
+│   │   ├── telegramService.ts
+│   │   └── tokenService.ts
+│   ├── scripts/
+│   │   ├── exportTokens.ts
+│   │   ├── importTokens.ts
+│   │   └── deleteDatabase.ts
+│   └── app.ts
+├── CLAUDE.md
+├── MIGRATION-TO-TYPESCRIPT.md
+└── package.json
 ```
 
 ## Modelo de Datos
 
 ### Token
-```javascript
+```typescript
 {
-    token: String,          // Identificador único
-    email: String,          // Email del usuario
-    name: String,           // Nombre del usuario
-    phone: String,          // Teléfono
-    createdAt: Date,        // Fecha de creación
-    expiresAt: Date,        // Fecha de expiración
-    isRedeemed: Boolean,    // Estado de redención
-    redeemedAt: Date,       // Fecha de redención
-    machineId: String,      // ID de máquina
-    redemptionDetails: {
-        ip: String,         // IP de redención
-        deviceInfo: String, // Info del dispositivo
-        timestamp: Date     // Timestamp de redención
+    token: string;          // Identificador unico (hex 32 chars)
+    email: string;          // Email del usuario
+    name: string;           // Nombre del usuario
+    phone: string;          // Telefono
+    createdAt: Date;        // Fecha de creacion
+    expiresAt: Date;        // Fecha de expiracion (1er dia del mes siguiente)
+    isRedeemed: boolean;    // Estado de redencion
+    redeemedAt?: Date;      // Fecha de redencion
+    machineId?: string;     // ID de maquina
+    redemptionDetails?: {
+        ip: string;         // IP de redencion
+        deviceInfo: string; // Info del dispositivo
+        timestamp: Date;    // Timestamp de redencion
     }
 }
 ```
-
-## Mejores Prácticas
-
-### Seguridad
-- Implementar rate limiting en producción
-- Usar HTTPS para todas las comunicaciones (Railway lo proporciona automáticamente)
-- Proteger endpoints sensibles con autenticación
-- Almacenar tokens y datos sensibles de forma segura
-
-### Rendimiento
-- Implementar caché donde sea apropiado
-- Manejar timeouts de red adecuadamente
-- Implementar lógica de reintentos para solicitudes fallidas
 
 ## Mantenimiento
 
 ### Logs
 Los logs del sistema incluyen:
-- Generación de tokens
+- Generacion de tokens
 - Validaciones de tokens
 - Errores de sistema
 - Actividad del bot de Telegram
 
 ### Acceso a logs en Railway
 ```bash
-# Ver logs en Railway
 railway logs
 ```
 
 ### Backups
 Se recomienda:
 - Realizar backups diarios de la base de datos
-- Exportar regularmente la base de datos usando el script de exportación
-- Mantener copias de seguridad en múltiples ubicaciones
-
-## Configuración de Railway
-
-### Variables de Entorno Requeridas
-```
-MONGODB_URI=mongodb+srv://...
-TELEGRAM_TOKEN=123456789:ABC-...
-JWT_SECRET=tu_clave_secreta
-ADMIN_CHAT_ID=123456789
-NODE_ENV=production
-```
-
-### Dominio Personalizado
-
-Railway permite configurar dominios personalizados:
-1. Ir a Settings > Networking
-2. Agregar tu dominio personalizado
-3. Configurar los registros DNS según las instrucciones
+- Exportar regularmente la base de datos usando el script de exportacion
+- Mantener copias de seguridad en multiples ubicaciones
 
 ## Troubleshooting
 
 ### Problemas comunes en Railway
 
-1. **Bot no responde**: Verifica que `RAILWAY_PUBLIC_DOMAIN` está configurado
-2. **Errores de conexión MongoDB**: Asegúrate que `MONGODB_URI` está correctamente configurado
-3. **Webhook no funciona**: Verifica que el servicio está corriendo en HTTPS
+1. **Bot no responde**: Verifica que `RAILWAY_PUBLIC_DOMAIN` esta configurado
+2. **Errores de conexion MongoDB**: Asegurate que `MONGODB_URI` esta correctamente configurado
+3. **Webhook no funciona**: Verifica que el servicio esta corriendo en HTTPS
 
 ### Verificar estado del servicio
 
@@ -252,13 +272,6 @@ Railway permite configurar dominios personalizados:
 curl https://tu-dominio.railway.app/api/status
 ```
 
-## Soporte
-
-Para soporte técnico o reportar problemas:
-1. Revisar la documentación en `/docs`
-2. Consultar los logs de Railway
-3. Abrir un issue en el repositorio
-    
 ## Licencia
 
-Este proyecto está bajo la licencia [Your License]. Ver el archivo `LICENSE` para más detalles.
+Este proyecto esta bajo la licencia ISC. Ver el archivo `LICENSE` para mas detalles.

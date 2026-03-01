@@ -14,6 +14,7 @@ npm run dev        # Desarrollo con hot-reload (nodemon src/app.js)
 ```
 
 Scripts de datos (ejecutar directamente):
+
 ```bash
 node src/scripts/exportTokens.js   # Exporta tokens a Excel
 node src/scripts/importTokens.js   # Importa tokens desde Excel
@@ -49,10 +50,11 @@ Campos clave: `token` (hex 32 chars, único), `email`, `name`, `phone`, `expires
 
 ### API REST (prefijo `/api`)
 
-- `GET /status` — health check
-- `POST /validate` — valida y redime un token (body: `token`, `machineId`)
-- `GET /tokens` — lista todos los tokens con paginación
-- `GET /check-validity/:token` — verifica validez sin redimir
+- `GET /status` — health check (publico)
+- `POST /login` — obtener JWT admin (body: `adminKey`) (publico, rate limited: 5 intentos/15min)
+- `POST /validate` — valida y redime un token, body: `token`, `machineId` (publico, maquina-a-servidor)
+- `GET /check-validity/:token` — verifica validez sin redimir (publico, maquina-a-servidor)
+- `GET /tokens` — lista todos los tokens con paginacion (protegido, requiere `Authorization: Bearer <JWT>`)
 
 ### Bot de Telegram
 
@@ -64,7 +66,10 @@ Campos clave: `token` (hex 32 chars, único), `email`, `name`, `phone`, `expires
 
 ### Entorno
 
-Variables requeridas (ver `.env.example`): `MONGODB_URI`, `TELEGRAM_TOKEN`, `ADMIN_CHAT_ID`, `JWT_SECRET`, `NODE_ENV`.
+Variables requeridas (ver `.env.example`): `MONGODB_URI`, `TELEGRAM_TOKEN`, `ADMIN_CHAT_ID`, `ADMIN_API_KEY`, `JWT_SECRET`, `NODE_ENV`.
+
+- `ADMIN_CHAT_ID` — usado por el bot de Telegram para verificar administrador.
+- `ADMIN_API_KEY` — clave secreta para autenticacion en `POST /login` (API REST). No debe ser el mismo valor que `ADMIN_CHAT_ID`.
 
 La detección de producción usa `NODE_ENV === 'production'` **o** la presencia de `RAILWAY_ENVIRONMENT_NAME`.
 
@@ -73,4 +78,4 @@ La detección de producción usa `NODE_ENV === 'production'` **o** la presencia 
 - Todo el código usa `require`/`module.exports` (CommonJS), no ES modules.
 - Async/await en todo el código asíncrono.
 - Los mensajes del bot y logs usan español con emojis.
-- `authService.js` tiene utilidades JWT pero **no está integrado** como middleware de protección de rutas.
+- `authService.ts` provee JWT utilities, integrado como middleware en `authMiddleware.ts` para proteger endpoints admin (`GET /tokens`).

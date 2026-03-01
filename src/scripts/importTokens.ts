@@ -8,20 +8,39 @@ import * as XLSX from 'xlsx';
 
 import config from '../config/config';
 import Token, { type IRedemptionDetails } from '../models/tokenModel';
+import { getFirstDayOfNextMonthAfterMonths } from '../services/tokenService';
 
 interface ExcelRow {
+  // Columnas comunes (sin variantes)
   Token?: string;
   Email?: string;
   Nombre?: string;
+  Estado?: string;
+
+  // Sin acento / underscore (exportTokens.ts)
   Telefono?: string;
   Fecha_Creacion?: string;
   Fecha_Expiracion?: string;
-  Estado?: string;
   Fecha_Canje?: string;
   ID_Maquina?: string;
   IP_Redencion?: string;
   Dispositivo_Redencion?: string;
   Timestamp_Redencion?: string;
+
+  // Con acento (tokenService.ts exportToExcel)
+  Teléfono?: string;
+  'Fecha de Alta'?: string;
+  'Fecha de Expiración'?: string;
+  Fecha_Creación?: string;
+  Fecha_Expiración?: string;
+  Fecha_Redención?: string;
+  ID_Máquina?: string;
+  IP_Redención?: string;
+  Dispositivo_Redención?: string;
+  Timestamp_Redención?: string;
+
+  // Permitir columnas adicionales desconocidas
+  [key: string]: string | undefined;
 }
 
 interface ImportResults {
@@ -56,43 +75,54 @@ interface TokenCreateData {
 }
 
 function parseDate(dateStr: string | undefined | null): Date | null {
-  if (!dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') {
     return null;
   }
 
-  // Regex para el formato especifico
-  const regex = /(\d{2})\/(\d{2})\/(\d{4}),\s*(\d{1,2}):(\d{2}):(\d{2})\s*(a\.m\.|p\.m\.)/i;
-  const match = dateStr.match(regex);
+  const trimmed = dateStr.trim();
 
-  if (!match) {
-    throw new Error(`Formato de fecha no reconocido: ${dateStr}`);
+  // Intentar ISO 8601 primero (mas robusto)
+  const isoDate = new Date(trimmed);
+  if (!isNaN(isoDate.getTime()) && trimmed.includes('-')) {
+    return isoDate;
   }
 
-  const day = match[1] ?? '01';
-  const month = match[2] ?? '01';
-  const year = match[3] ?? '2000';
-  const hours = match[4] ?? '0';
-  const minutes = match[5] ?? '00';
-  const seconds = match[6] ?? '00';
-  const period = match[7] ?? 'a.m.';
-
-  // Convertir a formato 24 horas
-  let hour = parseInt(hours, 10);
-  if (period.toLowerCase() === 'p.m.' && hour !== 12) {
-    hour += 12;
-  } else if (period.toLowerCase() === 'a.m.' && hour === 12) {
-    hour = 0;
-  }
-
-  // Crear objeto Date
-  return new Date(
-    parseInt(year, 10),
-    parseInt(month, 10) - 1,
-    parseInt(day, 10),
-    hour,
-    parseInt(minutes, 10),
-    parseInt(seconds, 10),
+  // Formato dd/mm/yyyy, hh:mm:ss a.m./p.m. (export script)
+  const fullMatch = trimmed.match(
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(a\.?\s*m\.?|p\.?\s*m\.?)?$/i,
   );
+  if (fullMatch) {
+    const day = parseInt(fullMatch[1] ?? '0', 10);
+    const month = parseInt(fullMatch[2] ?? '0', 10) - 1;
+    const year = parseInt(fullMatch[3] ?? '0', 10);
+    let hours = parseInt(fullMatch[4] ?? '0', 10);
+    const minutes = parseInt(fullMatch[5] ?? '0', 10);
+    const seconds = parseInt(fullMatch[6] ?? '0', 10);
+    const meridiem = fullMatch[7];
+
+    if (meridiem) {
+      const isPM = /p\.?\s*m\.?/i.test(meridiem);
+      if (isPM && hours < 12) {
+        hours += 12;
+      }
+      if (!isPM && hours === 12) {
+        hours = 0;
+      }
+    }
+
+    return new Date(year, month, day, hours, minutes, seconds);
+  }
+
+  // Formato dd/mm/yyyy simple
+  const simpleMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (simpleMatch) {
+    const day = parseInt(simpleMatch[1] ?? '0', 10);
+    const month = parseInt(simpleMatch[2] ?? '0', 10) - 1;
+    const year = parseInt(simpleMatch[3] ?? '0', 10);
+    return new Date(year, month, day);
+  }
+
+  return null;
 }
 
 async function importTokens(): Promise<void> {
@@ -125,7 +155,7 @@ async function importTokens(): Promise<void> {
       errors: [],
     };
 
-    for (const row of data) {
+    for (const [i, row] of data.entries()) {
       try {
         // Verificar que el token existe en el archivo Excel
         if (!row.Token) {
@@ -133,44 +163,62 @@ async function importTokens(): Promise<void> {
           continue;
         }
 
+        // Resolver columnas con fallback: sin acento -> con acento -> variante alternativa
+        const telefono = row.Telefono || row['Teléfono'];
+        const fechaCreacionStr =
+          row.Fecha_Creacion || row['Fecha_Creación'] || row['Fecha de Alta'];
+        const fechaExpiracionStr =
+          row.Fecha_Expiracion || row['Fecha_Expiración'] || row['Fecha de Expiración'];
+        const fechaCanjeStr = row.Fecha_Canje || row['Fecha_Redención'];
+        const idMaquina = row.ID_Maquina || row['ID_Máquina'];
+        const ipRedencion = row.IP_Redencion || row['IP_Redención'];
+        const dispositivoRedencion = row.Dispositivo_Redencion || row['Dispositivo_Redención'];
+
         // Parsear las fechas
         let createdAt: Date;
         let expiresAt: Date;
         let redeemedAt: Date | null = null;
 
-        try {
-          if (row.Fecha_Creacion) {
-            const parsed = parseDate(row.Fecha_Creacion);
-            createdAt = parsed ?? new Date();
+        // createdAt: si viene pero no parsea, rechazar fila
+        if (fechaCreacionStr) {
+          const parsed = parseDate(fechaCreacionStr);
+          if (parsed) {
+            createdAt = parsed;
           } else {
-            // Si no hay fecha de creacion, usar la actual
-            createdAt = new Date();
+            results.errors.push(
+              `Fila ${i + 1}: fecha de creacion invalida "${fechaCreacionStr}", fila rechazada`,
+            );
+            continue;
           }
+        } else {
+          createdAt = new Date();
+        }
 
-          if (row.Fecha_Expiracion) {
-            const parsed = parseDate(row.Fecha_Expiracion);
-            expiresAt = parsed ?? new Date(createdAt.getTime() + 90 * 24 * 60 * 60 * 1000);
+        // expiresAt: si viene pero no parsea, rechazar fila
+        if (fechaExpiracionStr) {
+          const parsed = parseDate(fechaExpiracionStr);
+          if (parsed) {
+            expiresAt = parsed;
           } else {
-            // Si no hay fecha de expiracion, crear una por defecto (90 dias)
-            expiresAt = new Date(createdAt.getTime() + 90 * 24 * 60 * 60 * 1000);
+            results.errors.push(
+              `Fila ${i + 1}: fecha de expiracion invalida "${fechaExpiracionStr}", fila rechazada`,
+            );
+            continue;
           }
+        } else {
+          expiresAt = getFirstDayOfNextMonthAfterMonths(createdAt, 1);
+        }
 
-          if (row.Fecha_Canje) {
-            redeemedAt = parseDate(row.Fecha_Canje);
+        // redeemedAt: si viene pero no parsea, solo warning (no rechazar)
+        if (fechaCanjeStr) {
+          const parsed = parseDate(fechaCanjeStr);
+          if (parsed) {
+            redeemedAt = parsed;
+          } else {
+            console.warn(
+              `⚠️ Fila ${i + 1}: fecha de canje no reconocida "${fechaCanjeStr}", ignorando`,
+            );
           }
-
-          // Verificar que las fechas son validas
-          if (
-            isNaN(createdAt.getTime()) ||
-            isNaN(expiresAt.getTime()) ||
-            (redeemedAt && isNaN(redeemedAt.getTime()))
-          ) {
-            throw new Error('Una o mas fechas no son validas');
-          }
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          results.errors.push(`Error en fechas para token ${row.Token}: ${message}`);
-          continue;
         }
 
         // Buscar si el token ya existe
@@ -189,8 +237,8 @@ async function importTokens(): Promise<void> {
           if (row.Nombre) {
             updateFields.name = row.Nombre;
           }
-          if (row.Telefono) {
-            updateFields.phone = row.Telefono;
+          if (telefono) {
+            updateFields.phone = telefono;
           }
           if (redeemedAt) {
             updateFields.redeemedAt = redeemedAt;
@@ -198,14 +246,14 @@ async function importTokens(): Promise<void> {
           if (row.Estado === 'Canjeado') {
             updateFields.isRedeemed = true;
           }
-          if (row.ID_Maquina) {
-            updateFields.machineId = row.ID_Maquina;
+          if (idMaquina) {
+            updateFields.machineId = idMaquina;
           }
-          if (row.Dispositivo_Redencion || row.IP_Redencion) {
+          if (dispositivoRedencion || ipRedencion) {
             updateFields.redemptionDetails = {
               ...(existingToken.redemptionDetails ?? {}),
-              ...(row.IP_Redencion ? { ip: row.IP_Redencion } : {}),
-              ...(row.Dispositivo_Redencion ? { deviceInfo: row.Dispositivo_Redencion } : {}),
+              ...(ipRedencion ? { ip: ipRedencion } : {}),
+              ...(dispositivoRedencion ? { deviceInfo: dispositivoRedencion } : {}),
               ...(redeemedAt ? { timestamp: redeemedAt } : {}),
             };
           }
@@ -220,21 +268,21 @@ async function importTokens(): Promise<void> {
             token: row.Token,
             email: row.Email || 'no-email@example.com',
             name: row.Nombre || 'Usuario',
-            phone: row.Telefono || '0000000000',
+            phone: telefono || '0000000000',
             createdAt: createdAt,
             expiresAt: expiresAt,
             isRedeemed: row.Estado === 'Canjeado',
             redeemedAt: redeemedAt ?? undefined,
           };
 
-          if (row.ID_Maquina) {
-            tokenData.machineId = row.ID_Maquina;
+          if (idMaquina) {
+            tokenData.machineId = idMaquina;
           }
 
-          if (row.Dispositivo_Redencion || row.IP_Redencion) {
+          if (dispositivoRedencion || ipRedencion) {
             tokenData.redemptionDetails = {
-              ip: row.IP_Redencion || '',
-              deviceInfo: row.Dispositivo_Redencion || '',
+              ip: ipRedencion || '',
+              deviceInfo: dispositivoRedencion || '',
               timestamp: redeemedAt ?? new Date(),
             };
           }

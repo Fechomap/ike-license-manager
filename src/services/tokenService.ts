@@ -316,6 +316,14 @@ export async function getExpiredTokens(): Promise<ITokenDocument[]> {
 }
 
 /**
+ * Eliminar un token por su valor.
+ */
+export async function deleteToken(tokenValue: string): Promise<boolean> {
+  const result = await Token.deleteOne({ token: tokenValue });
+  return result.deletedCount > 0;
+}
+
+/**
  * Renovar token por meses.
  */
 export async function renewToken(tokenId: string, months: number): Promise<ITokenDocument> {

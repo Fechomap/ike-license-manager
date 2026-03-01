@@ -1,8 +1,8 @@
-# IKE License Manager - Documentación de API
+# IKE License Manager - Documentacion de API
 
-## Descripción General
+## Descripcion General
 
-IKE License Manager es un sistema robusto de gestión de licencias de software que proporciona capacidades de generación, validación y administración de tokens a través de una API REST. Esta documentación proporciona información detallada sobre los endpoints disponibles, formatos de solicitud/respuesta y ejemplos de integración. La API está desplegada en Railway.
+IKE License Manager es un sistema de gestion de licencias de software que proporciona capacidades de generacion, validacion y administracion de tokens a traves de una API REST. Esta documentacion proporciona informacion detallada sobre los endpoints disponibles, formatos de solicitud/respuesta y ejemplos de integracion. La API esta desplegada en Railway.
 
 ## URL Base
 
@@ -12,49 +12,118 @@ https://tu-dominio.railway.app/api
 
 *Nota: Reemplaza `tu-dominio.railway.app` con tu dominio real generado por Railway.*
 
-## Autenticación
+## Autenticacion
 
-Actualmente, la API no requiere autenticación. La implementación planificada incluirá:
+La API utiliza una estrategia mixta de autenticacion:
 
-- **Autenticación por API Key**: Para comunicaciones servidor a servidor
-- **Autenticación JWT**: Para control de acceso basado en usuarios a endpoints de administración
+- **Endpoints publicos**: Los endpoints consumidos maquina-a-servidor (`/validate`, `/check-validity`, `/status`) no requieren autenticacion.
+- **Endpoints administrativos**: El endpoint `GET /tokens` requiere un JWT obtenido via `POST /login`.
 
-Hasta que se implemente la autenticación, se recomienda tener precaución con los endpoints que modifican datos y considerar la implementación de restricciones de IP a nivel de red.
+### Obtener un JWT
+
+Enviar una solicitud `POST /login` con el `adminKey` (valor de `ADMIN_API_KEY` configurado en el servidor):
+
+```bash
+curl -X POST https://tu-dominio.railway.app/api/login \
+  -H "Content-Type: application/json" \
+  -d '{"adminKey": "tu_admin_api_key"}'
+```
+
+> **Nota:** Si `ADMIN_API_KEY` no esta configurada, el servidor acepta temporalmente `ADMIN_CHAT_ID` como fallback (deprecated). Se recomienda configurar `ADMIN_API_KEY` lo antes posible.
+
+Respuesta exitosa:
+```json
+{
+  "success": true,
+  "token": "eyJhbGciOiJIUzI1NiIs..."
+}
+```
+
+El token JWT tiene una validez de **24 horas**. Para usar endpoints protegidos, incluir el header:
+```
+Authorization: Bearer <token>
+```
 
 ## Endpoints
 
 ### 1. Verificar Estado de la API
 
-Verifica si la API está activa y funcionando correctamente.
+Verifica si la API esta activa y funcionando correctamente.
 
 **Solicitud**
-- Método: `GET`
+- Metodo: `GET`
 - Endpoint: `/status`
+- Auth: Publico
 
-**Respuesta**
-- Código de Estado: `200 OK`
-
+**Respuesta** (200 OK)
 ```json
 {
-  "message": "API funcionando correctamente"
+  "status": "API is running",
+  "timestamp": "2026-02-28T12:00:00.000Z"
 }
 ```
 
-### 2. Validar y Activar Token
+### 2. Login Admin
 
-Valida un token y lo activa vinculándolo a un dispositivo específico.
+Obtiene un JWT para acceder a endpoints protegidos.
 
 **Solicitud**
-- Método: `POST`
+- Metodo: `POST`
+- Endpoint: `/login`
+- Content-Type: `application/json`
+- Auth: Publico
+
+**Cuerpo de la Solicitud**
+```json
+{
+  "adminKey": "tu_admin_api_key"
+}
+```
+
+> `adminKey` se valida contra la variable de entorno `ADMIN_API_KEY`. Temporalmente se acepta `ADMIN_CHAT_ID` como fallback si `ADMIN_API_KEY` no esta definida.
+
+**Respuesta Exitosa** (200 OK)
+```json
+{
+  "success": true,
+  "token": "eyJhbGciOiJIUzI1NiIs..."
+}
+```
+
+**Respuesta de Error**
+
+Credenciales invalidas (401 Unauthorized)
+```json
+{
+  "success": false,
+  "message": "Credenciales invalidas"
+}
+```
+
+Error del Servidor (500 Internal Server Error)
+```json
+{
+  "success": false,
+  "message": "Error al generar token"
+}
+```
+
+### 3. Validar y Activar Token
+
+Valida un token y lo activa vinculandolo a un dispositivo especifico.
+
+**Solicitud**
+- Metodo: `POST`
 - Endpoint: `/validate`
 - Content-Type: `application/json`
+- Auth: Publico
 
 **Cuerpo de la Solicitud**
 ```json
 {
   "token": "ad1c6c6f6f881d8637306efa48922ff4",
   "machineId": "machine-12345",
-  "deviceInfo": "iPhone 14 Pro, iOS 17"  // Opcional
+  "deviceInfo": "iPhone 14 Pro, iOS 17"
 }
 ```
 
@@ -63,14 +132,13 @@ Valida un token y lo activa vinculándolo a un dispositivo específico.
 {
   "success": true,
   "message": "Token validado y activado correctamente",
-  "expiresAt": "2025-02-19T14:42:55.275Z",
-  "daysRemaining": 30
+  "expiresAt": "2025-02-19T14:42:55.275Z"
 }
 ```
 
 **Respuestas de Error**
 
-Parámetros Faltantes (400 Bad Request)
+Parametros Faltantes (400 Bad Request)
 ```json
 {
   "success": false,
@@ -108,20 +176,20 @@ Error del Servidor (500 Internal Server Error)
 {
   "success": false,
   "message": "Error al validar el token",
-  "error": "Detalles del mensaje de error" // Solo en entornos de desarrollo
+  "error": "Detalles del mensaje de error"
 }
 ```
 
-### 3. Listar Todos los Tokens
+### 4. Listar Todos los Tokens
 
 Recupera una lista de todos los tokens registrados y su estado actual.
 
 **Solicitud**
-- Método: `GET`
+- Metodo: `GET`
 - Endpoint: `/tokens`
-- Parámetros de Consulta:
-  - `page`: Número de página (predeterminado: 1)
-  - `limit`: Elementos por página (predeterminado: 5, máximo: 100)
+- Auth: Requiere JWT (`Authorization: Bearer <token>`)
+- Parametros de Consulta:
+  - `page`: Numero de pagina (predeterminado: 1)
 
 **Respuesta** (200 OK)
 ```json
@@ -130,7 +198,7 @@ Recupera una lista de todos los tokens registrados y su estado actual.
     {
       "token": "ad1c6c6f6f881d8637306efa48922ff4",
       "email": "usuario@ejemplo.com",
-      "name": "Juan Pérez",
+      "name": "Juan Perez",
       "phone": "+1234567890",
       "createdAt": "2023-11-15T10:30:00.000Z",
       "expiresAt": "2024-02-15T10:30:00.000Z",
@@ -142,26 +210,33 @@ Recupera una lista de todos los tokens registrados y su estado actual.
         "deviceInfo": "iPhone 14 Pro, iOS 17",
         "timestamp": "2023-11-16T14:22:00.000Z"
       },
-      "daysRemaining": 30
-    },
-    {
-      "token": "ad59e4c476e47ed21180e0d540564b7c",
-      "email": "otro@ejemplo.com",
-      "name": "María García",
-      "phone": "+9876543210",
-      "createdAt": "2023-12-01T09:15:00.000Z",
-      "expiresAt": "2024-03-01T09:15:00.000Z",
-      "isRedeemed": false,
-      "daysRemaining": 60
+      "remainingDays": 30
     }
   ],
   "currentPage": 1,
-  "totalPages": 5,
-  "totalTokens": 25
+  "totalPages": 5
 }
 ```
 
-**Respuesta de Error** (500 Internal Server Error)
+**Respuestas de Error**
+
+No autorizado (401 Unauthorized)
+```json
+{
+  "success": false,
+  "message": "Token de autorizacion requerido"
+}
+```
+
+Token JWT invalido (401 Unauthorized)
+```json
+{
+  "success": false,
+  "message": "Token invalido o expirado"
+}
+```
+
+Error del Servidor (500 Internal Server Error)
 ```json
 {
   "success": false,
@@ -169,35 +244,39 @@ Recupera una lista de todos los tokens registrados y su estado actual.
 }
 ```
 
-### 4. Verificar Validez del Token
+### 5. Verificar Validez del Token
 
-Verifica si un token es válido sin canjearlo.
+Verifica si un token es valido sin canjearlo.
 
 **Solicitud**
-- Método: `GET`
+- Metodo: `GET`
 - Endpoint: `/check-validity/:token`
+- Auth: Publico
 
-**Respuesta Exitosa** (200 OK)
+**Respuesta** (200 OK)
 ```json
-{
-  "isActive": true
-}
+true
 ```
 
-**Respuesta de Token Inválido o Error** (200 OK con resultado falso)
+**Respuesta de Token Invalido o Error** (200 OK)
 ```json
-{
-  "isActive": false
-}
+false
 ```
 
-## Ejemplos de Integración
+## Ejemplos de Integracion
 
 ### Ejemplos con cURL
 
 #### Verificar Estado de la API
 ```bash
 curl -X GET https://tu-dominio.railway.app/api/status
+```
+
+#### Obtener JWT Admin
+```bash
+curl -X POST https://tu-dominio.railway.app/api/login \
+  -H "Content-Type: application/json" \
+  -d '{"adminKey": "tu_admin_api_key"}'
 ```
 
 #### Validar Token
@@ -207,9 +286,10 @@ curl -X POST https://tu-dominio.railway.app/api/validate \
   -d '{"token": "ad1c6c6f6f881d8637306efa48922ff4", "machineId": "machine-12345", "deviceInfo": "MacBook Pro, macOS 12.5"}'
 ```
 
-#### Listar Tokens
+#### Listar Tokens (requiere JWT)
 ```bash
-curl -X GET https://tu-dominio.railway.app/api/tokens
+curl -X GET https://tu-dominio.railway.app/api/tokens \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
 ```
 
 #### Verificar Validez del Token
@@ -217,209 +297,105 @@ curl -X GET https://tu-dominio.railway.app/api/tokens
 curl -X GET https://tu-dominio.railway.app/api/check-validity/ad1c6c6f6f881d8637306efa48922ff4
 ```
 
-### JavaScript (Node.js con Axios)
+### JavaScript (Node.js con fetch)
 
-```javascript
-const axios = require('axios');
-
+```typescript
 const API_BASE_URL = 'https://tu-dominio.railway.app/api';
 
-// Verificar Estado de la API
-async function verificarEstadoAPI() {
-  try {
-    const response = await axios.get(`${API_BASE_URL}/status`);
-    console.log('Estado de la API:', response.data);
-    return response.data;
-  } catch (error) {
-    console.error('Error al verificar estado de la API:', error.response?.data || error.message);
-    throw error;
-  }
+// Obtener JWT
+async function login(adminKey: string): Promise<string> {
+  const response = await fetch(`${API_BASE_URL}/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ adminKey }),
+  });
+  const data = await response.json();
+  if (!data.success) throw new Error(data.message);
+  return data.token;
+}
+
+// Listar Tokens (con JWT)
+async function listarTokens(jwtToken: string, page = 1) {
+  const response = await fetch(`${API_BASE_URL}/tokens?page=${page}`, {
+    headers: { Authorization: `Bearer ${jwtToken}` },
+  });
+  return response.json();
 }
 
 // Validar Token
-async function validarToken(token, machineId, deviceInfo) {
-  try {
-    const response = await axios.post(`${API_BASE_URL}/validate`, {
-      token,
-      machineId,
-      deviceInfo
-    });
-    console.log('Resultado de validación del token:', response.data);
-    return response.data;
-  } catch (error) {
-    console.error('Error de validación del token:', error.response?.data || error.message);
-    throw error;
-  }
-}
-
-// Listar Todos los Tokens (con paginación)
-async function listarTokens(page = 1) {
-  try {
-    const response = await axios.get(`${API_BASE_URL}/tokens`, {
-      params: { page }
-    });
-    console.log('Lista de tokens:', response.data);
-    return response.data;
-  } catch (error) {
-    console.error('Error al listar tokens:', error.response?.data || error.message);
-    throw error;
-  }
-}
-
-// Verificar validez del token sin canjearlo
-async function verificarValidezToken(token) {
-  try {
-    const response = await axios.get(`${API_BASE_URL}/check-validity/${token}`);
-    console.log('Validez del token:', response.data);
-    return response.data.isActive;
-  } catch (error) {
-    console.error('Error al verificar validez del token:', error.response?.data || error.message);
-    return false;
-  }
+async function validarToken(token: string, machineId: string, deviceInfo?: string) {
+  const response = await fetch(`${API_BASE_URL}/validate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, machineId, deviceInfo }),
+  });
+  return response.json();
 }
 ```
 
-### Python (con requests)
-
-```python
-import requests
-
-API_BASE_URL = 'https://tu-dominio.railway.app/api'
-
-def verificar_estado_api():
-    try:
-        response = requests.get(f'{API_BASE_URL}/status')
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        print(f'Error al verificar estado de la API: {e}')
-        return None
-
-def validar_token(token, machine_id, device_info=None):
-    try:
-        payload = {
-            'token': token,
-            'machineId': machine_id,
-            'deviceInfo': device_info
-        }
-        response = requests.post(f'{API_BASE_URL}/validate', json=payload)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        print(f'Error al validar token: {e}')
-        return None
-
-def listar_tokens(pagina=1):
-    try:
-        params = {'page': pagina}
-        response = requests.get(f'{API_BASE_URL}/tokens', params=params)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        print(f'Error al listar tokens: {e}')
-        return None
-
-def verificar_validez_token(token):
-    try:
-        response = requests.get(f'{API_BASE_URL}/check-validity/{token}')
-        response.raise_for_status()
-        return response.json().get('isActive', False)
-    except requests.exceptions.RequestException as e:
-        print(f'Error al verificar validez del token: {e}')
-        return False
-```
-
-## Mejores Prácticas
+## Mejores Practicas
 
 1. **Manejo de Errores**
    - Implementar siempre un manejo adecuado de errores en tus aplicaciones cliente
-   - Verificar los códigos de estado HTTP y manejarlos apropiadamente
-   - Analizar los datos de respuesta cuidadosamente para manejar formatos inesperados
-   - Implementar lógica de reintento para errores de red transitorios
+   - Verificar los codigos de estado HTTP y manejarlos apropiadamente
+   - Implementar logica de reintento para errores de red transitorios
 
 2. **Consideraciones de Seguridad**
-   - Almacenar datos sensibles (tokens, IDs de máquina) de forma segura
+   - Almacenar datos sensibles (tokens, IDs de maquina) de forma segura
    - Implementar SSL/TLS para todas las comunicaciones con la API (Railway lo proporciona por defecto)
-   - Considerar la implementación de limitación de tasa en tus aplicaciones cliente
-   - No codificar tokens directamente en el código de tu aplicación
+   - No codificar tokens directamente en el codigo de tu aplicacion
+   - Renovar el JWT antes de que expire (validez de 24 horas)
 
 3. **Rendimiento**
-   - Implementar caché donde sea apropiado
+   - Implementar cache donde sea apropiado
    - Manejar tiempos de espera de red elegantemente
-   - Utilizar los parámetros de paginación para listar tokens y evitar cargas grandes
+   - Utilizar los parametros de paginacion para listar tokens y evitar cargas grandes
 
-4. **Gestión de Tokens**
+4. **Gestion de Tokens**
    - Almacenar el machineId de forma segura en el dispositivo cliente
-   - Implementar mensajes de error apropiados para los usuarios cuando la validación del token falla
-   - Considerar la implementación de un flujo de renovación antes de que los tokens expiren
-
-## Límites y Restricciones
-
-- Límite de tasa de API: 100 solicitudes por minuto por dirección IP
-- Tamaño máximo de carga útil de solicitud: 1MB
-- Los listados de tokens están paginados con un valor predeterminado de 5 elementos por página y un máximo de 100
+   - Implementar mensajes de error apropiados para los usuarios cuando la validacion del token falla
+   - Considerar la implementacion de un flujo de renovacion antes de que los tokens expiren
 
 ## Modelo de Datos
 
 El modelo de token incluye los siguientes campos:
 
-```javascript
+```typescript
 {
-  token: String,          // Identificador único del token
-  email: String,          // Correo electrónico del usuario
-  name: String,           // Nombre del usuario
-  phone: String,          // Número de teléfono del usuario
-  createdAt: Date,        // Fecha de creación del token
-  expiresAt: Date,        // Fecha de expiración del token
-  isRedeemed: Boolean,    // Estado de canje
-  redeemedAt: Date,       // Fecha de canje
-  machineId: String,      // Identificador único de la máquina
-  redemptionDetails: {
-    ip: String,           // Dirección IP utilizada para el canje
-    deviceInfo: String,   // Información del dispositivo
-    timestamp: Date       // Marca de tiempo del canje
-  },
-  daysRemaining: Number   // Campo calculado: días hasta la expiración
+  token: string;          // Identificador unico del token (hex 32 chars)
+  email: string;          // Correo electronico del usuario
+  name: string;           // Nombre del usuario
+  phone: string;          // Numero de telefono del usuario
+  createdAt: Date;        // Fecha de creacion del token
+  expiresAt: Date;        // Fecha de expiracion (1er dia del mes siguiente)
+  isRedeemed: boolean;    // Estado de canje
+  redeemedAt?: Date;      // Fecha de canje
+  machineId?: string;     // Identificador unico de la maquina
+  redemptionDetails?: {
+    ip: string;           // Direccion IP utilizada para el canje
+    deviceInfo: string;   // Informacion del dispositivo
+    timestamp: Date;      // Marca de tiempo del canje
+  }
 }
 ```
 
-## Versionado de API
+## Informacion de Railway
 
-Esta documentación cubre la v1 de la API. Los cambios futuros serán versionados utilizando versionado basado en ruta (por ejemplo, `/api/v2/...`).
+### Caracteristicas de Railway
 
-## Información de Railway
-
-### Características de Railway
-
-- **HTTPS automático**: Todos los endpoints están disponibles sobre HTTPS
-- **Escalabilidad automática**: El servicio se escala según la demanda
-- **Monitorización**: Railway proporciona métricas de rendimiento y logs
-- **Variables de entorno**: Gestión segura de configuración
-
-### Verificación de Salud
-
-Railway proporciona un endpoint de health check automático. Puedes verificar que tu instancia esté saludable:
-
-```bash
-curl https://tu-dominio.railway.app/health
-```
-
-## Soporte
-
-Para soporte adicional o para reportar problemas:
-- Abrir un issue en el repositorio del proyecto
-- Contactar al equipo de desarrollo a través de [correo de soporte]
-- Consultar la documentación del proyecto en el repositorio
-- Revisar los logs de Railway para diagnóstico
+- **HTTPS automatico**: Todos los endpoints estan disponibles sobre HTTPS
+- **Escalabilidad automatica**: El servicio se escala segun la demanda
+- **Monitorizacion**: Railway proporciona metricas de rendimiento y logs
+- **Variables de entorno**: Gestion segura de configuracion
 
 ## Registro de Cambios
 
-**v1.0.0 (27/02/2024)**
-- Lanzamiento inicial con validación, listado y verificación de estado de tokens
-- Implementación de canje de tokens con vinculación a máquina
-- Migración de Heroku a Railway
+**v1.1.0 (2026-02-28)**
+- Migracion completa a TypeScript
+- Endpoint `POST /login` para obtener JWT admin
+- Middleware de autenticacion JWT para `GET /tokens`
 
-**Características Planificadas**
-- Autenticación de usuario para endpoints de gestión de tokens
-- API de generación de tokens por lotes
-- Informes y análisis mejorados
+**v1.0.0 (2024-02-27)**
+- Lanzamiento inicial con validacion, listado y verificacion de estado de tokens
+- Implementacion de canje de tokens con vinculacion a maquina
+- Migracion de Heroku a Railway
