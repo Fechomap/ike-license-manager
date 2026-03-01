@@ -11,11 +11,27 @@ PASSED=0
 FAILED=0
 TOTAL=0
 
+# Token y machineId para pruebas de success path
+TEST_TOKEN="aaaabbbbccccddddeeeeffffaaaabbbb"
+TEST_MACHINE_ID="test-machine-integration-01"
+
 # Colores
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
+
+# ------------------------------------------------------------------
+# Pre-requisito: dist/ debe existir (compilacion TypeScript)
+# ------------------------------------------------------------------
+if [ ! -f "dist/config/config.js" ]; then
+  echo -e "${RED}ERROR${NC}: dist/ no existe. Ejecuta 'npx tsc' primero."
+  exit 1
+fi
+
+# ------------------------------------------------------------------
+# Helpers de asercion
+# ------------------------------------------------------------------
 
 assert_status() {
   local test_name="$1"
@@ -53,6 +69,82 @@ assert_json_field() {
   fi
 }
 
+assert_json_has_field() {
+  local test_name="$1"
+  local field="$2"
+  local json="$3"
+  TOTAL=$((TOTAL + 1))
+  local value
+  value=$(echo "$json" | python3 -c "import sys,json; d=json.load(sys.stdin); print('__MISSING__' if '$field' not in d else d['$field'])" 2>/dev/null || echo "__ERROR__")
+  if [ "$value" != "__MISSING__" ] && [ "$value" != "__ERROR__" ]; then
+    PASSED=$((PASSED + 1))
+    echo -e "${GREEN}PASS${NC} $test_name ($field present)"
+  else
+    FAILED=$((FAILED + 1))
+    echo -e "${RED}FAIL${NC} $test_name ($field missing)"
+  fi
+}
+
+# ------------------------------------------------------------------
+# Teardown: limpiar token de prueba al salir (siempre)
+# ------------------------------------------------------------------
+cleanup() {
+  node -e "
+  const mongoose = require('mongoose');
+  const config = require('./dist/config/config').default || require('./dist/config/config');
+  async function cleanup() {
+    await mongoose.connect(config.mongodbURI);
+    const Token = mongoose.model('Token', new mongoose.Schema({ token: String }));
+    await Token.deleteOne({ token: '$TEST_TOKEN' });
+    await mongoose.disconnect();
+  }
+  cleanup().catch(() => {});
+  " 2>/dev/null
+}
+trap cleanup EXIT
+
+# ------------------------------------------------------------------
+# Setup: crear token de prueba en MongoDB
+# ------------------------------------------------------------------
+echo -e "${YELLOW}--- SETUP: Creando token de prueba en MongoDB ---${NC}"
+SETUP_RESULT=$(node -e "
+const mongoose = require('mongoose');
+const config = require('./dist/config/config').default || require('./dist/config/config');
+async function setup() {
+  await mongoose.connect(config.mongodbURI);
+  const Token = mongoose.model('Token', new mongoose.Schema({
+    token: String, email: String, name: String, phone: String,
+    createdAt: Date, expiresAt: Date, isRedeemed: Boolean,
+    redeemedAt: Date, machineId: String, redemptionDetails: Object
+  }));
+  // Limpiar token de prueba previo si existe
+  await Token.deleteOne({ token: '$TEST_TOKEN' });
+  // Crear token fresco con expiracion a 2 meses
+  const expiresAt = new Date();
+  expiresAt.setMonth(expiresAt.getMonth() + 2);
+  await Token.create({
+    token: '$TEST_TOKEN',
+    email: 'test@integration.local',
+    name: 'Integration Test',
+    phone: '1234567890',
+    createdAt: new Date(),
+    expiresAt: expiresAt,
+    isRedeemed: false
+  });
+  await mongoose.disconnect();
+  console.log('OK');
+}
+setup().catch(e => { console.error(e.message); process.exit(1); });
+" 2>&1)
+
+if [ "$SETUP_RESULT" != "OK" ]; then
+  echo -e "${RED}ERROR${NC}: No se pudo crear el token de prueba en MongoDB."
+  echo "  Detalle: $SETUP_RESULT"
+  exit 1
+fi
+echo -e "${GREEN}OK${NC} Token de prueba creado."
+echo ""
+
 echo "============================================"
 echo " Pruebas de Integracion - LICENSE-MANAGER"
 echo " Base URL: $BASE_URL"
@@ -71,9 +163,36 @@ assert_json_field "GET /status has status field" "status" "API is running" "$BOD
 echo ""
 
 # ------------------------------------------------------------------
-# 2. POST /validate - Parametros faltantes (400)
+# 2. GET /check-validity/:token - Token valido (200, valid=true)
 # ------------------------------------------------------------------
-echo -e "${YELLOW}--- 2. POST /validate - Params faltantes ---${NC}"
+echo -e "${YELLOW}--- 2. GET /check-validity - Token valido ---${NC}"
+RESPONSE=$(curl -s -w "\n%{http_code}" "$BASE_URL/check-validity/$TEST_TOKEN")
+HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+BODY=$(echo "$RESPONSE" | sed '$d')
+assert_status "GET /check-validity token valido returns 200" 200 "$HTTP_CODE" "$BODY"
+assert_json_field "Response has valid=True" "valid" "True" "$BODY"
+assert_json_has_field "Response has expiresAt" "expiresAt" "$BODY"
+echo ""
+
+# ------------------------------------------------------------------
+# 3. POST /validate - Token valido (200, success=true, valid=true)
+# ------------------------------------------------------------------
+echo -e "${YELLOW}--- 3. POST /validate - Token valido ---${NC}"
+RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/validate" \
+  -H "Content-Type: application/json" \
+  -d "{\"token\": \"$TEST_TOKEN\", \"machineId\": \"$TEST_MACHINE_ID\"}")
+HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+BODY=$(echo "$RESPONSE" | sed '$d')
+assert_status "POST /validate token valido returns 200" 200 "$HTTP_CODE" "$BODY"
+assert_json_field "Response has success=True" "success" "True" "$BODY"
+assert_json_field "Response has valid=True" "valid" "True" "$BODY"
+assert_json_has_field "Response has expiresAt" "expiresAt" "$BODY"
+echo ""
+
+# ------------------------------------------------------------------
+# 4. POST /validate - Parametros faltantes (400)
+# ------------------------------------------------------------------
+echo -e "${YELLOW}--- 4. POST /validate - Params faltantes ---${NC}"
 RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/validate" \
   -H "Content-Type: application/json" \
   -d '{}')
@@ -85,9 +204,9 @@ assert_json_field "Response has errorCode" "errorCode" "MISSING_PARAMS" "$BODY"
 echo ""
 
 # ------------------------------------------------------------------
-# 3. POST /validate - Formato invalido (400)
+# 5. POST /validate - Formato invalido (400)
 # ------------------------------------------------------------------
-echo -e "${YELLOW}--- 3. POST /validate - Formato invalido ---${NC}"
+echo -e "${YELLOW}--- 5. POST /validate - Formato invalido ---${NC}"
 RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/validate" \
   -H "Content-Type: application/json" \
   -d '{"token": "abc123", "machineId": "x"}')
@@ -98,9 +217,9 @@ assert_json_field "Response has errorCode INVALID_FORMAT" "errorCode" "INVALID_F
 echo ""
 
 # ------------------------------------------------------------------
-# 4. POST /validate - Token no encontrado
+# 6. POST /validate - Token no encontrado
 # ------------------------------------------------------------------
-echo -e "${YELLOW}--- 4. POST /validate - Token no encontrado ---${NC}"
+echo -e "${YELLOW}--- 6. POST /validate - Token no encontrado ---${NC}"
 RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/validate" \
   -H "Content-Type: application/json" \
   -d '{"token": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0", "machineId": "test-machine-001"}')
@@ -112,9 +231,9 @@ assert_json_field "Response has errorCode TOKEN_NOT_FOUND" "errorCode" "TOKEN_NO
 echo ""
 
 # ------------------------------------------------------------------
-# 5. GET /check-validity/:token - Formato invalido (400)
+# 7. GET /check-validity/:token - Formato invalido (400)
 # ------------------------------------------------------------------
-echo -e "${YELLOW}--- 5. GET /check-validity - Formato invalido ---${NC}"
+echo -e "${YELLOW}--- 7. GET /check-validity - Formato invalido ---${NC}"
 RESPONSE=$(curl -s -w "\n%{http_code}" "$BASE_URL/check-validity/not-a-valid-token")
 HTTP_CODE=$(echo "$RESPONSE" | tail -1)
 BODY=$(echo "$RESPONSE" | sed '$d')
@@ -123,9 +242,9 @@ assert_json_field "Response has valid=False" "valid" "False" "$BODY"
 echo ""
 
 # ------------------------------------------------------------------
-# 6. GET /check-validity/:token - Token no encontrado (200)
+# 8. GET /check-validity/:token - Token no encontrado (200)
 # ------------------------------------------------------------------
-echo -e "${YELLOW}--- 6. GET /check-validity - Token no encontrado ---${NC}"
+echo -e "${YELLOW}--- 8. GET /check-validity - Token no encontrado ---${NC}"
 RESPONSE=$(curl -s -w "\n%{http_code}" "$BASE_URL/check-validity/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0")
 HTTP_CODE=$(echo "$RESPONSE" | tail -1)
 BODY=$(echo "$RESPONSE" | sed '$d')
@@ -135,9 +254,9 @@ assert_json_field "Response has message" "message" "Token no encontrado" "$BODY"
 echo ""
 
 # ------------------------------------------------------------------
-# 7. GET /tokens - Sin JWT (401)
+# 9. GET /tokens - Sin JWT (401)
 # ------------------------------------------------------------------
-echo -e "${YELLOW}--- 7. GET /tokens - Sin JWT ---${NC}"
+echo -e "${YELLOW}--- 9. GET /tokens - Sin JWT ---${NC}"
 RESPONSE=$(curl -s -w "\n%{http_code}" "$BASE_URL/tokens")
 HTTP_CODE=$(echo "$RESPONSE" | tail -1)
 BODY=$(echo "$RESPONSE" | sed '$d')
@@ -146,9 +265,23 @@ assert_json_field "Response has success=False" "success" "False" "$BODY"
 echo ""
 
 # ------------------------------------------------------------------
-# 8. POST /login - Credenciales invalidas (403)
+# 10. POST /login - Credenciales invalidas (403)
 # ------------------------------------------------------------------
-echo -e "${YELLOW}--- 8. POST /login - Credenciales invalidas ---${NC}"
+# Pre-check: verificar si estamos rate-limited en login
+PRE_CHECK=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/login" \
+  -H "Content-Type: application/json" \
+  -d '{"adminKey": "__pre_check__"}')
+PRE_STATUS=$(echo "$PRE_CHECK" | tail -1)
+if [ "$PRE_STATUS" -eq 429 ]; then
+  RETRY_AFTER=$(curl -sI -X POST "$BASE_URL/login" \
+    -H "Content-Type: application/json" \
+    -d '{"adminKey": "__pre_check__"}' | grep -i 'retry-after' | tr -d '\r' | awk '{print $2}')
+  WAIT=${RETRY_AFTER:-60}
+  echo -e "${YELLOW}WARN${NC} Rate-limited en /login. Esperando ${WAIT}s..."
+  sleep "$WAIT"
+fi
+
+echo -e "${YELLOW}--- 10. POST /login - Credenciales invalidas ---${NC}"
 RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/login" \
   -H "Content-Type: application/json" \
   -d '{"adminKey": "clave_incorrecta"}')
@@ -159,13 +292,19 @@ assert_json_field "Response has success=False" "success" "False" "$BODY"
 echo ""
 
 # ------------------------------------------------------------------
-# 9. POST /login - Login exitoso + GET /tokens con JWT
+# 11. POST /login - Login exitoso + GET /tokens con JWT
 # ------------------------------------------------------------------
-echo -e "${YELLOW}--- 9. POST /login + GET /tokens con JWT ---${NC}"
+echo -e "${YELLOW}--- 11. POST /login + GET /tokens con JWT ---${NC}"
 ADMIN_KEY="${ADMIN_API_KEY:-}"
 if [ -z "$ADMIN_KEY" ]; then
-  echo -e "${YELLOW}SKIP${NC} ADMIN_API_KEY no definida en entorno. Definela para probar login+tokens."
-  echo "  Uso: ADMIN_API_KEY=tu_clave bash tests/integration/api.test.sh"
+  if [ "${CI:-}" = "true" ]; then
+    echo -e "${RED}FAIL${NC} ADMIN_API_KEY requerida en CI"
+    FAILED=$((FAILED + 1))
+    TOTAL=$((TOTAL + 1))
+  else
+    echo -e "${YELLOW}SKIP${NC} ADMIN_API_KEY no definida en entorno. Definela para probar login+tokens."
+    echo "  Uso: ADMIN_API_KEY=tu_clave bash tests/integration/api.test.sh"
+  fi
 else
   # Login
   RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/login" \

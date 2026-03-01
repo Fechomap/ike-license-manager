@@ -293,7 +293,12 @@ export async function validateAndRedeemToken(
   const tokenRecord = await Token.findOne({ token });
 
   if (!tokenRecord) {
-    return { success: false, valid: false, message: 'Token no encontrado', errorCode: 'TOKEN_NOT_FOUND' };
+    return {
+      success: false,
+      valid: false,
+      message: 'Token no encontrado',
+      errorCode: 'TOKEN_NOT_FOUND',
+    };
   }
 
   if (tokenRecord.isRedeemed) {
