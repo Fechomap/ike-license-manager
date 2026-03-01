@@ -26,7 +26,10 @@
       "Bash(npx prettier:*)",
       "Bash(npx eslint:*)",
       "Bash(npx vitest run)",
-      "Bash(npx vitest:*)"
+      "Bash(npx vitest:*)",
+      "Bash(cd:*)",
+      "Bash(echo Sintaxis OK:*)",
+      "Bash(echo psql not found:*)"
     ]
   },
   "enableAllProjectMcpServers": false

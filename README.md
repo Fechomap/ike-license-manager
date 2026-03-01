@@ -1,6 +1,6 @@
 # IKE License Manager
 
-Sistema de gestion de licencias con bot de Telegram y API REST para la validacion y administracion de tokens. Proyecto TypeScript desplegado en Railway con MongoDB Atlas.
+Sistema de gestion de licencias con bot de Telegram y API REST para la validacion y administracion de tokens. Proyecto TypeScript desplegado en Railway con PostgreSQL.
 
 ## Caracteristicas Principales
 
@@ -15,7 +15,7 @@ Sistema de gestion de licencias con bot de Telegram y API REST para la validacio
 ## Requisitos Previos
 
 - Node.js (v16 o superior)
-- MongoDB
+- PostgreSQL (v14 o superior)
 - Token de Bot de Telegram
 - Variables de entorno configuradas
 - Cuenta en Railway (para deployment)
@@ -41,33 +41,46 @@ cp .env.example .env
 Editar el archivo `.env` con tus configuraciones:
 ```env
 PORT=3000
-MONGODB_URI=mongodb://localhost/ike-license
+DATABASE_URL=postgresql://user:password@localhost:5432/ike_license_manager
 TELEGRAM_TOKEN=your_telegram_bot_token
 JWT_SECRET=your_jwt_secret
 ADMIN_CHAT_ID=your_admin_chat_id          # ID del chat de Telegram del administrador (usado por el bot)
-ADMIN_API_KEY=tu_clave_admin_segura_aqui   # Clave para POST /login (fallback temporal: ADMIN_CHAT_ID)
+ADMIN_API_KEY=tu_clave_admin_segura_aqui   # Clave para POST /login
 NODE_ENV=production # Para entorno Railway
 RAILWAY_ENVIRONMENT_NAME=production # Configuracion de Railway
 RAILWAY_PUBLIC_DOMAIN=tu-dominio.railway.app # Solo para Railway
 ```
 
+4. Crear la base de datos y aplicar migraciones:
+```bash
+createdb ike_license_manager    # Crear la BD (si no existe)
+npx prisma migrate deploy       # Aplicar migraciones
+```
+
 ## Comandos
 
 ```bash
-npm run dev        # Desarrollo con hot-reload (tsx watch src/app.ts)
-npm run build      # Compila TypeScript a dist/ (tsc)
+npm run dev        # Desarrollo con hot-reload (prisma generate + tsx watch)
+npm run build      # Genera Prisma Client + compila TypeScript (prisma generate + tsc)
 npm start          # Inicia el servidor compilado (node dist/app.js)
-npm run typecheck  # Verificacion de tipos (tsc --noEmit)
+npm run typecheck  # Verificacion de tipos (prisma generate + tsc --noEmit)
 npm run lint       # Lint con ESLint
 npm run format     # Formateo con Prettier
 npm run check      # Gate de calidad: typecheck + lint + format:check
+```
+
+Scripts de Prisma:
+```bash
+npm run prisma:generate  # Genera el Prisma Client
+npm run prisma:migrate   # Crea/aplica migraciones de desarrollo
+npm run prisma:studio    # UI visual para la base de datos
 ```
 
 Scripts de datos (ejecutar directamente):
 ```bash
 npx tsx src/scripts/exportTokens.ts   # Exporta tokens a Excel
 npx tsx src/scripts/importTokens.ts   # Importa tokens desde Excel
-npx tsx src/scripts/deleteDatabase.ts # Elimina la base de datos
+npx tsx src/scripts/deleteDatabase.ts # Elimina todos los tokens
 ```
 
 ## Deployment en Railway
@@ -75,8 +88,9 @@ npx tsx src/scripts/deleteDatabase.ts # Elimina la base de datos
 ### Configuracion inicial
 
 1. Conecta tu repositorio a Railway
-2. Configura las variables de entorno:
-   - `MONGODB_URI`: Tu cadena de conexion a MongoDB
+2. Agrega un servicio de PostgreSQL en Railway
+3. Configura las variables de entorno:
+   - `DATABASE_URL`: Connection string de PostgreSQL (Railway la genera automaticamente al vincular el addon)
    - `TELEGRAM_TOKEN`: Token de tu bot de Telegram
    - `JWT_SECRET`: Clave secreta para JWT
    - `ADMIN_CHAT_ID`: ID del chat de Telegram del administrador (usado por el bot)
@@ -89,7 +103,7 @@ npx tsx src/scripts/deleteDatabase.ts # Elimina la base de datos
 
 4. Build y start commands:
    - **Build**: `npm install && npm run build`
-   - **Start**: `npm start` (ejecuta `node dist/app.js`)
+   - **Start**: El Procfile ejecuta `npx prisma migrate deploy && node dist/app.js`
 
 ### Verificacion del deployment
 
@@ -188,18 +202,23 @@ Authorization: Bearer <token>
 
 ```
 IKE-LICENSE-MANAGER/
-├── docs/
-│   └── api_documentation.md
+├── prisma/
+│   ├── schema.prisma           # Schema de la base de datos
+│   └── migrations/             # Migraciones SQL versionadas
 ├── src/
 │   ├── config/
-│   │   ├── config.ts
-│   │   └── database.ts
+│   │   ├── config.ts           # Variables de entorno centralizadas
+│   │   └── database.ts         # Conexion PostgreSQL via Prisma
 │   ├── controllers/
 │   │   └── apiController.ts
+│   ├── generated/
+│   │   └── prisma/             # Prisma Client generado (no commitear)
+│   ├── lib/
+│   │   └── prisma.ts           # Singleton PrismaClient
 │   ├── middleware/
 │   │   └── authMiddleware.ts
 │   ├── models/
-│   │   └── tokenModel.ts
+│   │   └── tokenModel.ts       # Tipos de compatibilidad (re-export Prisma)
 │   ├── routes/
 │   │   └── apiRoutes.ts
 │   ├── services/
@@ -211,34 +230,42 @@ IKE-LICENSE-MANAGER/
 │   │   ├── importTokens.ts
 │   │   └── deleteDatabase.ts
 │   └── app.ts
+├── tests/
+│   └── integration/
+│       └── api.test.sh
 ├── CLAUDE.md
-├── MIGRATION-TO-TYPESCRIPT.md
 └── package.json
 ```
 
 ## Modelo de Datos
 
-### Token
+### Token (PostgreSQL via Prisma)
 ```typescript
 {
-    token: string;          // Identificador unico (hex 32 chars)
-    email: string;          // Email del usuario
-    name: string;           // Nombre del usuario
-    phone: string;          // Telefono
-    createdAt: Date;        // Fecha de creacion
-    expiresAt: Date;        // Fecha de expiracion (1er dia del mes siguiente)
-    isRedeemed: boolean;    // Estado de redencion
-    redeemedAt?: Date;      // Fecha de redencion
-    machineId?: string;     // ID de maquina
-    redemptionDetails?: {
-        ip: string;         // IP de redencion
-        deviceInfo: string; // Info del dispositivo
-        timestamp: Date;    // Timestamp de redencion
-    }
+    id: string;               // ID unico (cuid)
+    token: string;            // Identificador unico (hex 32 chars)
+    email: string;            // Email del usuario
+    name: string;             // Nombre del usuario
+    phone: string;            // Telefono
+    createdAt: Date;          // Fecha de creacion
+    expiresAt: Date;          // Fecha de expiracion (1er dia del mes siguiente)
+    isRedeemed: boolean;      // Estado de redencion
+    redeemedAt?: Date;        // Fecha de redencion
+    machineId?: string;       // ID de maquina
+    redemptionIp?: string;    // IP de redencion
+    redemptionDeviceInfo?: string; // Info del dispositivo
+    redemptionTimestamp?: Date;    // Timestamp de redencion
 }
 ```
 
 ## Mantenimiento
+
+### Migraciones de base de datos
+```bash
+npx prisma migrate dev --name <nombre_descriptivo>  # Desarrollo: genera + aplica
+npx prisma migrate deploy                            # Produccion: aplica pendientes
+npx prisma studio                                    # UI visual para explorar datos
+```
 
 ### Logs
 Los logs del sistema incluyen:
@@ -254,7 +281,7 @@ railway logs
 
 ### Backups
 Se recomienda:
-- Realizar backups diarios de la base de datos
+- Realizar backups diarios de la base de datos (`pg_dump`)
 - Exportar regularmente la base de datos usando el script de exportacion
 - Mantener copias de seguridad en multiples ubicaciones
 
@@ -263,8 +290,9 @@ Se recomienda:
 ### Problemas comunes en Railway
 
 1. **Bot no responde**: Verifica que `RAILWAY_PUBLIC_DOMAIN` esta configurado
-2. **Errores de conexion MongoDB**: Asegurate que `MONGODB_URI` esta correctamente configurado
-3. **Webhook no funciona**: Verifica que el servicio esta corriendo en HTTPS
+2. **Errores de conexion PostgreSQL**: Asegurate que `DATABASE_URL` esta correctamente configurado y la BD es accesible
+3. **Migraciones fallan**: Verifica que `prisma/migrations/` esta commiteado y el usuario de BD tiene permisos de DDL
+4. **Webhook no funciona**: Verifica que el servicio esta corriendo en HTTPS
 
 ### Verificar estado del servicio
 

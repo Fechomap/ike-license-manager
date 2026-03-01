@@ -22,10 +22,16 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 # ------------------------------------------------------------------
-# Pre-requisito: dist/ debe existir (compilacion TypeScript)
+# Pre-requisitos
 # ------------------------------------------------------------------
+if [ -z "${DATABASE_URL:-}" ]; then
+  echo -e "${RED}ERROR${NC}: DATABASE_URL no esta definida."
+  echo "  Uso: DATABASE_URL=postgresql://... bash tests/integration/api.test.sh"
+  exit 1
+fi
+
 if [ ! -f "dist/config/config.js" ]; then
-  echo -e "${RED}ERROR${NC}: dist/ no existe. Ejecuta 'npx tsc' primero."
+  echo -e "${RED}ERROR${NC}: dist/ no existe. Ejecuta 'npm run build' primero."
   exit 1
 fi
 
@@ -90,13 +96,13 @@ assert_json_has_field() {
 # ------------------------------------------------------------------
 cleanup() {
   node -e "
-  const mongoose = require('mongoose');
-  const config = require('./dist/config/config').default || require('./dist/config/config');
+  const { PrismaClient } = require('./dist/generated/prisma/client');
+  const { PrismaPg } = require('@prisma/adapter-pg');
+  const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+  const prisma = new PrismaClient({ adapter });
   async function cleanup() {
-    await mongoose.connect(config.mongodbURI);
-    const Token = mongoose.model('Token', new mongoose.Schema({ token: String }));
-    await Token.deleteOne({ token: '$TEST_TOKEN' });
-    await mongoose.disconnect();
+    await prisma.token.deleteMany({ where: { token: '$TEST_TOKEN' } });
+    await prisma.\$disconnect();
   }
   cleanup().catch(() => {});
   " 2>/dev/null
@@ -104,41 +110,39 @@ cleanup() {
 trap cleanup EXIT
 
 # ------------------------------------------------------------------
-# Setup: crear token de prueba en MongoDB
+# Setup: crear token de prueba en PostgreSQL
 # ------------------------------------------------------------------
-echo -e "${YELLOW}--- SETUP: Creando token de prueba en MongoDB ---${NC}"
+echo -e "${YELLOW}--- SETUP: Creando token de prueba en PostgreSQL ---${NC}"
 SETUP_RESULT=$(node -e "
-const mongoose = require('mongoose');
-const config = require('./dist/config/config').default || require('./dist/config/config');
+const { PrismaClient } = require('./dist/generated/prisma/client');
+const { PrismaPg } = require('@prisma/adapter-pg');
+const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+const prisma = new PrismaClient({ adapter });
 async function setup() {
-  await mongoose.connect(config.mongodbURI);
-  const Token = mongoose.model('Token', new mongoose.Schema({
-    token: String, email: String, name: String, phone: String,
-    createdAt: Date, expiresAt: Date, isRedeemed: Boolean,
-    redeemedAt: Date, machineId: String, redemptionDetails: Object
-  }));
   // Limpiar token de prueba previo si existe
-  await Token.deleteOne({ token: '$TEST_TOKEN' });
+  await prisma.token.deleteMany({ where: { token: '$TEST_TOKEN' } });
   // Crear token fresco con expiracion a 2 meses
   const expiresAt = new Date();
   expiresAt.setMonth(expiresAt.getMonth() + 2);
-  await Token.create({
-    token: '$TEST_TOKEN',
-    email: 'test@integration.local',
-    name: 'Integration Test',
-    phone: '1234567890',
-    createdAt: new Date(),
-    expiresAt: expiresAt,
-    isRedeemed: false
+  await prisma.token.create({
+    data: {
+      token: '$TEST_TOKEN',
+      email: 'test@integration.local',
+      name: 'Integration Test',
+      phone: '1234567890',
+      createdAt: new Date(),
+      expiresAt: expiresAt,
+      isRedeemed: false
+    }
   });
-  await mongoose.disconnect();
+  await prisma.\$disconnect();
   console.log('OK');
 }
 setup().catch(e => { console.error(e.message); process.exit(1); });
 " 2>&1)
 
 if [ "$SETUP_RESULT" != "OK" ]; then
-  echo -e "${RED}ERROR${NC}: No se pudo crear el token de prueba en MongoDB."
+  echo -e "${RED}ERROR${NC}: No se pudo crear el token de prueba en PostgreSQL."
   echo "  Detalle: $SETUP_RESULT"
   exit 1
 fi
