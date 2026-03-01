@@ -44,6 +44,31 @@ El token JWT tiene una validez de **24 horas**. Para usar endpoints protegidos, 
 Authorization: Bearer <token>
 ```
 
+## Rate Limiting
+
+La API aplica limites de tasa para prevenir abuso:
+
+| Endpoint | Limite | Ventana |
+|---|---|---|
+| `POST /login` | 5 solicitudes | 15 minutos |
+| `POST /validate` | 30 solicitudes | 15 minutos |
+| `GET /check-validity/:token` | 30 solicitudes | 15 minutos |
+
+Cuando se excede el limite, la API responde con **429 Too Many Requests**:
+
+```json
+{
+  "success": false,
+  "valid": false,
+  "message": "Demasiadas solicitudes de validacion. Intente en 15 minutos."
+}
+```
+
+Los headers de respuesta incluyen informacion de rate limit (estandar `draft-7`):
+- `RateLimit-Limit`: limite maximo de solicitudes
+- `RateLimit-Remaining`: solicitudes restantes
+- `RateLimit-Reset`: segundos hasta que se reinicie la ventana
+
 ## Endpoints
 
 ### 1. Verificar Estado de la API
@@ -92,7 +117,7 @@ Obtiene un JWT para acceder a endpoints protegidos.
 
 **Respuesta de Error**
 
-Credenciales invalidas (401 Unauthorized)
+Credenciales invalidas (403 Forbidden)
 ```json
 {
   "success": false,
@@ -127,10 +152,13 @@ Valida un token y lo activa vinculandolo a un dispositivo especifico.
 }
 ```
 
+> `machineId` debe ser alfanumerico (letras, numeros, `.`, `_`, `:`, `-`), entre 8 y 128 caracteres.
+
 **Respuesta Exitosa** (200 OK)
 ```json
 {
   "success": true,
+  "valid": true,
   "message": "Token validado y activado correctamente",
   "expiresAt": "2025-02-19T14:42:55.275Z"
 }
@@ -142,32 +170,50 @@ Parametros Faltantes (400 Bad Request)
 ```json
 {
   "success": false,
-  "message": "Token y machineId son requeridos"
+  "valid": false,
+  "message": "Token y machineId son requeridos",
+  "errorCode": "MISSING_PARAMS"
 }
 ```
 
-Token No Encontrado (404 Not Found)
+Formato Invalido (400 Bad Request)
 ```json
 {
   "success": false,
-  "message": "Token no encontrado"
+  "valid": false,
+  "message": "Formato de token invalido",
+  "errorCode": "INVALID_FORMAT"
 }
 ```
 
-Token Ya Canjeado (400 Bad Request)
+Token No Encontrado (200 OK)
 ```json
 {
   "success": false,
+  "valid": false,
+  "message": "Token no encontrado",
+  "errorCode": "TOKEN_NOT_FOUND"
+}
+```
+
+Token Ya Canjeado (200 OK)
+```json
+{
+  "success": false,
+  "valid": false,
   "message": "Token ya ha sido utilizado",
+  "errorCode": "TOKEN_ALREADY_REDEEMED",
   "redeemedAt": "2023-12-15T10:30:00.000Z"
 }
 ```
 
-Token Expirado (400 Bad Request)
+Token Expirado (200 OK)
 ```json
 {
   "success": false,
-  "message": "Token expirado"
+  "valid": false,
+  "message": "Token expirado",
+  "errorCode": "TOKEN_EXPIRED"
 }
 ```
 
@@ -175,8 +221,9 @@ Error del Servidor (500 Internal Server Error)
 ```json
 {
   "success": false,
+  "valid": false,
   "message": "Error al validar el token",
-  "error": "Detalles del mensaje de error"
+  "errorCode": "INTERNAL_ERROR"
 }
 ```
 
@@ -253,14 +300,37 @@ Verifica si un token es valido sin canjearlo.
 - Endpoint: `/check-validity/:token`
 - Auth: Publico
 
-**Respuesta** (200 OK)
+**Respuesta Token Valido** (200 OK)
 ```json
-true
+{
+  "valid": true,
+  "message": "Token valido",
+  "expiresAt": "2025-02-19T14:42:55.275Z"
+}
 ```
 
-**Respuesta de Token Invalido o Error** (200 OK)
+**Respuesta Token No Encontrado** (200 OK)
 ```json
-false
+{
+  "valid": false,
+  "message": "Token no encontrado"
+}
+```
+
+**Respuesta Token Expirado** (200 OK)
+```json
+{
+  "valid": false,
+  "message": "Token expirado"
+}
+```
+
+**Formato Invalido** (400 Bad Request)
+```json
+{
+  "valid": false,
+  "message": "Formato de token invalido"
+}
 ```
 
 ## Ejemplos de Integracion
@@ -329,7 +399,19 @@ async function validarToken(token: string, machineId: string, deviceInfo?: strin
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ token, machineId, deviceInfo }),
   });
-  return response.json();
+  const data = await response.json();
+  // data.valid === true si el token fue activado exitosamente
+  // data.errorCode indica el tipo de error si valid === false
+  return data;
+}
+
+// Verificar Validez del Token (sin canjearlo)
+async function verificarValidez(token: string) {
+  const response = await fetch(`${API_BASE_URL}/check-validity/${token}`);
+  const data = await response.json();
+  // data.valid === true si el token es valido
+  // data.expiresAt disponible si valid === true
+  return data;
 }
 ```
 
@@ -394,6 +476,11 @@ El modelo de token incluye los siguientes campos:
 - Migracion completa a TypeScript
 - Endpoint `POST /login` para obtener JWT admin
 - Middleware de autenticacion JWT para `GET /tokens`
+- Rate limiting en endpoints de validacion (`/validate`, `/check-validity`)
+- Contrato de respuesta enriquecido con `valid` y `errorCode`
+- Endpoint `/check-validity` devuelve objeto estructurado en lugar de booleano
+- Validacion estricta de formato de token (hex 32 chars)
+- Logging estructurado JSON en endpoints de validacion
 
 **v1.0.0 (2024-02-27)**
 - Lanzamiento inicial con validacion, listado y verificacion de estado de tokens

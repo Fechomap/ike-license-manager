@@ -47,8 +47,14 @@ interface TokenWithRemainingDays {
 }
 
 type ValidationResult =
-  | { success: false; message: string; redeemedAt?: Date }
-  | { success: true; message: string; expiresAt: Date };
+  | { success: false; valid: false; message: string; errorCode: string; redeemedAt?: Date }
+  | { success: true; valid: true; message: string; expiresAt: Date };
+
+export interface TokenStatusResult {
+  valid: boolean;
+  message: string;
+  expiresAt?: Date;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers internos
@@ -148,6 +154,24 @@ export async function isTokenValid(token: string): Promise<boolean> {
   const tokenRecord = await Token.findOne({ token });
   // Solo verifica existencia y que no haya expirado
   return !!(tokenRecord && new Date() <= tokenRecord.expiresAt);
+}
+
+/**
+ * Verifica el estado de un token y devuelve un objeto con detalles.
+ * A diferencia de isTokenValid, retorna informacion estructurada sin redimir.
+ */
+export async function checkTokenStatus(token: string): Promise<TokenStatusResult> {
+  const tokenRecord = await Token.findOne({ token });
+
+  if (!tokenRecord) {
+    return { valid: false, message: 'Token no encontrado' };
+  }
+
+  if (tokenRecord.expiresAt && new Date() > tokenRecord.expiresAt) {
+    return { valid: false, message: 'Token expirado' };
+  }
+
+  return { valid: true, message: 'Token valido', expiresAt: tokenRecord.expiresAt };
 }
 
 export async function getShareLinks(token: string): Promise<ShareLinks> {
@@ -269,19 +293,21 @@ export async function validateAndRedeemToken(
   const tokenRecord = await Token.findOne({ token });
 
   if (!tokenRecord) {
-    return { success: false, message: 'Token no encontrado' };
+    return { success: false, valid: false, message: 'Token no encontrado', errorCode: 'TOKEN_NOT_FOUND' };
   }
 
   if (tokenRecord.isRedeemed) {
     return {
       success: false,
+      valid: false,
       message: 'Token ya ha sido utilizado',
+      errorCode: 'TOKEN_ALREADY_REDEEMED',
       redeemedAt: tokenRecord.redeemedAt,
     };
   }
 
   if (tokenRecord.expiresAt && new Date() > tokenRecord.expiresAt) {
-    return { success: false, message: 'Token expirado' };
+    return { success: false, valid: false, message: 'Token expirado', errorCode: 'TOKEN_EXPIRED' };
   }
 
   const redeemedAt = new Date();
@@ -300,6 +326,7 @@ export async function validateAndRedeemToken(
 
   return {
     success: true,
+    valid: true,
     message: 'Token validado y activado correctamente',
     expiresAt: tokenRecord.expiresAt,
   };
