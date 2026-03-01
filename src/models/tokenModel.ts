@@ -1,10 +1,10 @@
-import mongoose, { type Document, type Model, type Schema } from 'mongoose';
+import type { Token } from '../generated/prisma/client';
 
-export interface IRedemptionDetails {
-  ip?: string;
-  deviceInfo?: string;
-  timestamp?: Date;
-}
+// Re-export del tipo generado por Prisma
+export type { Token };
+
+// Alias de compatibilidad para el resto del codigo
+export type ITokenDocument = Token;
 
 export interface IToken {
   token: string;
@@ -14,30 +14,25 @@ export interface IToken {
   createdAt: Date;
   expiresAt: Date;
   isRedeemed: boolean;
-  redeemedAt?: Date;
-  machineId?: string;
+  redeemedAt?: Date | null;
+  machineId?: string | null;
   redemptionDetails?: IRedemptionDetails;
 }
 
-export type ITokenDocument = IToken & Document;
+export interface IRedemptionDetails {
+  ip?: string;
+  deviceInfo?: string;
+  timestamp?: Date;
+}
 
-const tokenSchema: Schema<ITokenDocument> = new mongoose.Schema({
-  token: { type: String, required: true, unique: true },
-  email: { type: String, required: true },
-  name: { type: String, required: true },
-  phone: { type: String, required: true },
-  createdAt: { type: Date, default: Date.now },
-  expiresAt: { type: Date, required: true },
-  isRedeemed: { type: Boolean, default: false },
-  redeemedAt: { type: Date },
-  machineId: { type: String },
-  redemptionDetails: {
-    ip: String,
-    deviceInfo: String,
-    timestamp: Date,
-  },
-});
-
-const Token: Model<ITokenDocument> = mongoose.model<ITokenDocument>('Token', tokenSchema);
-
-export default Token;
+// Helper para reconstruir redemptionDetails desde columnas planas
+export function getRedemptionDetails(token: Token): IRedemptionDetails | undefined {
+  if (!token.redemptionIp && !token.redemptionDeviceInfo && !token.redemptionTimestamp) {
+    return undefined;
+  }
+  return {
+    ip: token.redemptionIp ?? undefined,
+    deviceInfo: token.redemptionDeviceInfo ?? undefined,
+    timestamp: token.redemptionTimestamp ?? undefined,
+  };
+}
