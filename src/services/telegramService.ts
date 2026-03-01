@@ -21,6 +21,20 @@ interface UserState {
 }
 
 // ---------------------------------------------------------------------------
+// Teclado persistente
+// ---------------------------------------------------------------------------
+
+const MAIN_KEYBOARD: TelegramBot.SendMessageOptions['reply_markup'] = {
+  keyboard: [
+    [{ text: '🎫 Generar Token' }, { text: '📋 Listar Tokens' }],
+    [{ text: '⚠️ Por Caducar' }, { text: '❌ Expirados' }],
+  ],
+  resize_keyboard: true,
+  one_time_keyboard: false,
+  is_persistent: true,
+};
+
+// ---------------------------------------------------------------------------
 // Clase TelegramService
 // ---------------------------------------------------------------------------
 
@@ -43,6 +57,24 @@ class TelegramService {
     }
     this.userStates = new Map();
     this.initializeCommands();
+    void this.registerMenuCommands();
+  }
+
+  async registerMenuCommands(): Promise<void> {
+    try {
+      await this.bot.setMyCommands([
+        { command: 'start', description: '🏠 Mostrar menú principal' },
+        { command: 'generar_token', description: '🎫 Generar un nuevo token' },
+        { command: 'listar_tokens', description: '📋 Listar todos los tokens' },
+        { command: 'tokens_caducando', description: '⚠️ Tokens próximos a vencer' },
+        { command: 'tokens_expirados', description: '❌ Tokens expirados' },
+      ]);
+    } catch (error: unknown) {
+      console.error(
+        '❌ Error al registrar comandos del menú:',
+        error instanceof Error ? error.message : error,
+      );
+    }
   }
 
   async setupWebhook(): Promise<void> {
@@ -64,32 +96,38 @@ class TelegramService {
   }
 
   initializeCommands(): void {
+    // Comandos slash (fallback)
     this.bot.onText(/\/start/, (msg: TelegramBot.Message) => {
       void this.handleStart(msg);
-    });
-    this.bot.onText(/\/help/, (msg: TelegramBot.Message) => {
-      void this.handleHelp(msg);
     });
     this.bot.onText(/\/generar_token/, (msg: TelegramBot.Message) => {
       void this.startTokenGeneration(msg);
     });
-
-    // Comando para listar tokens
     this.bot.onText(/\/listar_tokens/, (msg: TelegramBot.Message) => {
       void this.handleListTokens(msg);
     });
-
-    // Comando para ver tokens próximos a expirar
     this.bot.onText(/\/tokens_caducando/, (msg: TelegramBot.Message) => {
       void this.handleTokensExpiringSoon(msg);
     });
-
-    // Comando para tokens expirados
     this.bot.onText(/\/tokens_expirados/, (msg: TelegramBot.Message) => {
       void this.handleExpiredTokens(msg);
     });
 
-    // Manejador de callbacks para los botones
+    // Botones del teclado persistente
+    this.bot.onText(/🎫 Generar Token/, (msg: TelegramBot.Message) => {
+      void this.startTokenGeneration(msg);
+    });
+    this.bot.onText(/📋 Listar Tokens/, (msg: TelegramBot.Message) => {
+      void this.handleListTokens(msg);
+    });
+    this.bot.onText(/⚠️ Por Caducar/, (msg: TelegramBot.Message) => {
+      void this.handleTokensExpiringSoon(msg);
+    });
+    this.bot.onText(/❌ Expirados/, (msg: TelegramBot.Message) => {
+      void this.handleExpiredTokens(msg);
+    });
+
+    // Manejador de callbacks para los botones inline
     this.bot.on('callback_query', (query: TelegramBot.CallbackQuery) => {
       void this.handleCallbackQuery(query);
     });
@@ -326,21 +364,8 @@ class TelegramService {
     const chatId = msg.chat.id;
     await this.bot.sendMessage(
       chatId,
-      '🎉 ¡Bienvenido al Bot de Gestión de Licencias!\n' +
-        'Usa /help para ver los comandos disponibles.',
-    );
-  }
-
-  async handleHelp(msg: TelegramBot.Message): Promise<void> {
-    const chatId = msg.chat.id;
-    await this.bot.sendMessage(
-      chatId,
-      '🔍 Comandos disponibles:\n\n' +
-        '🎯 /generar_token - Genera un nuevo token\n' +
-        '📋 /listar_tokens - Muestra todos los tokens\n' +
-        '⚠️ /tokens_caducando - Lista tokens próximos a vencer\n' +
-        '❌ /tokens_expirados - Lista tokens expirados\n' +
-        '❓ /help - Muestra este mensaje',
+      '👋 ¡Bienvenido al gestor de licencias!\nUsa los botones para comenzar.',
+      { reply_markup: MAIN_KEYBOARD },
     );
   }
 
@@ -358,12 +383,27 @@ class TelegramService {
     const chatId = msg.chat.id;
     const userState = this.userStates.get(chatId);
 
-    if (!userState) {
+    const text = msg.text;
+    if (!text) {
       return;
     }
 
-    const text = msg.text;
-    if (!text) {
+    // Si no hay flujo activo, ignorar comandos/botones (ya tienen su handler)
+    // y para cualquier otro texto, reenviar el teclado
+    if (!userState) {
+      const isHandled =
+        text.startsWith('/') ||
+        text.includes('🎫 Generar Token') ||
+        text.includes('📋 Listar Tokens') ||
+        text.includes('⚠️ Por Caducar') ||
+        text.includes('❌ Expirados');
+      if (!isHandled) {
+        await this.bot.sendMessage(
+          chatId,
+          '👋 Usa los botones del menú para continuar.',
+          { reply_markup: MAIN_KEYBOARD },
+        );
+      }
       return;
     }
 
@@ -374,11 +414,12 @@ class TelegramService {
           userState.step = 'name';
           await this.bot.sendMessage(chatId, '👤 Por favor, ingresa el nombre completo:');
         } else {
+          this.userStates.delete(chatId);
           await this.bot.sendMessage(
             chatId,
-            '❌ Email inválido. Por favor, intenta nuevamente o usa /generar_token para comenzar de nuevo.',
+            '❌ Email inválido. Presiona 🎫 Generar Token para intentar de nuevo.',
+            { reply_markup: MAIN_KEYBOARD },
           );
-          this.userStates.delete(chatId);
         }
         break;
 
@@ -391,11 +432,12 @@ class TelegramService {
             '📱 Por favor, ingresa el número de teléfono (solo números):',
           );
         } else {
+          this.userStates.delete(chatId);
           await this.bot.sendMessage(
             chatId,
-            '❌ Nombre demasiado corto. Por favor, intenta nuevamente o usa /generar_token para comenzar de nuevo.',
+            '❌ Nombre demasiado corto. Presiona 🎫 Generar Token para intentar de nuevo.',
+            { reply_markup: MAIN_KEYBOARD },
           );
-          this.userStates.delete(chatId);
         }
         break;
 
@@ -405,11 +447,12 @@ class TelegramService {
           await this.generateAndSendToken(chatId, userState.data as UserData);
           this.userStates.delete(chatId);
         } else {
+          this.userStates.delete(chatId);
           await this.bot.sendMessage(
             chatId,
-            '❌ Número de teléfono inválido. Por favor, intenta nuevamente o usa /generar_token para comenzar de nuevo.',
+            '❌ Número de teléfono inválido. Presiona 🎫 Generar Token para intentar de nuevo.',
+            { reply_markup: MAIN_KEYBOARD },
           );
-          this.userStates.delete(chatId);
         }
         break;
     }
@@ -432,7 +475,9 @@ class TelegramService {
         '• Solo puede usarse en un dispositivo\n' +
         '• El mal uso puede resultar en cancelación';
 
-      await this.bot.sendMessage(chatId, telegramMessage);
+      await this.bot.sendMessage(chatId, telegramMessage, {
+        reply_markup: MAIN_KEYBOARD,
+      });
 
       // Mensaje simplificado para WhatsApp
       const whatsappMessage =
