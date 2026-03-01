@@ -57,7 +57,7 @@ build/
 # Testing
 /coverage
 
-# Local MongoDB data
+# Local database data
 /data/db
 
 # Excel files in data directory
@@ -66,3 +66,4 @@ src/scripts/data/*.xls
 
 # But keep the data directory
 !src/scripts/data/.gitkeep
+/src/generated/prisma

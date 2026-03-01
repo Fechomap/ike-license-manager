@@ -6,7 +6,7 @@ import importPlugin from 'eslint-plugin-import';
 export default [
   // Ignorar archivos de build
   {
-    ignores: ['dist/**', 'node_modules/**', '*.config.mjs'],
+    ignores: ['dist/**', 'node_modules/**', '*.config.mjs', 'src/generated/**'],
   },
 
   // Config base para JS (archivos aun no migrados)

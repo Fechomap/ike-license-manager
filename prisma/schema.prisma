@@ -1,0 +1,28 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Token {
+  id                   String    @id @default(cuid())
+  token                String    @unique
+  email                String
+  name                 String
+  phone                String
+  createdAt            DateTime  @default(now())
+  expiresAt            DateTime
+  isRedeemed           Boolean   @default(false)
+  redeemedAt           DateTime?
+  machineId            String?
+  redemptionIp         String?
+  redemptionDeviceInfo String?
+  redemptionTimestamp  DateTime?
+
+  @@index([expiresAt])
+  @@index([isRedeemed])
+  @@map("tokens")
+}
