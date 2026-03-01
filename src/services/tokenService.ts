@@ -71,7 +71,14 @@ export interface TokenStatusResult {
   expiresAt: string;
   message: string;
   reason?: string;
+  graceDaysRemaining?: number;
 }
+
+// ---------------------------------------------------------------------------
+// Constantes
+// ---------------------------------------------------------------------------
+
+const GRACE_PERIOD_DAYS = 5;
 
 // ---------------------------------------------------------------------------
 // Helpers internos
@@ -169,6 +176,11 @@ export async function createToken(userData: UserData): Promise<TokenWithShareLin
 /**
  * Verifica el estado de un token y devuelve un objeto con detalles.
  * Retorna null si el token no existe (el controller decide el HTTP status).
+ *
+ * Lógica de periodo de gracia:
+ * - Cuando un token expira por fecha, se otorgan 5 días de gracia.
+ * - Durante la gracia: valid=true, status='grace_period', graceDaysRemaining=N.
+ * - Pasados los 5 días: se auto-suspende el token en BD.
  */
 export async function checkTokenStatus(token: string): Promise<TokenStatusResult | null> {
   const tokenRecord = await prisma.token.findUnique({ where: { token } });
@@ -178,8 +190,9 @@ export async function checkTokenStatus(token: string): Promise<TokenStatusResult
   }
 
   const expiresAtISO = tokenRecord.expiresAt.toISOString();
+  const now = new Date();
 
-  // Verificar status administrativo primero
+  // Verificar status administrativo primero (sin gracia)
   if (
     tokenRecord.status === TokenStatus.suspended ||
     tokenRecord.status === TokenStatus.cancelled
@@ -194,12 +207,37 @@ export async function checkTokenStatus(token: string): Promise<TokenStatusResult
   }
 
   // Verificar expiración por fecha
-  if (new Date() > tokenRecord.expiresAt) {
+  if (now > tokenRecord.expiresAt) {
+    const msSinceExpiration = now.getTime() - tokenRecord.expiresAt.getTime();
+    const daysSinceExpiration = Math.floor(msSinceExpiration / (1000 * 60 * 60 * 24));
+
+    if (daysSinceExpiration < GRACE_PERIOD_DAYS) {
+      // Periodo de gracia activo: la app sigue funcionando pero muestra advertencia
+      const graceDaysRemaining = GRACE_PERIOD_DAYS - daysSinceExpiration;
+      return {
+        valid: true,
+        status: 'grace_period',
+        expiresAt: expiresAtISO,
+        message: 'Token expirado - periodo de gracia',
+        graceDaysRemaining,
+      };
+    }
+
+    // Periodo de gracia vencido → auto-suspender en BD
+    await prisma.token.update({
+      where: { token },
+      data: {
+        status: TokenStatus.suspended,
+        statusReason: 'Periodo de gracia vencido sin pago',
+      },
+    });
+
     return {
       valid: false,
-      status: 'expired',
+      status: 'suspended',
       expiresAt: expiresAtISO,
-      message: 'Token expirado',
+      message: 'Token suspendido',
+      reason: 'Periodo de gracia vencido sin pago',
     };
   }
 
