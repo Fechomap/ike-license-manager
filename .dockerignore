@@ -1,0 +1,14 @@
+node_modules
+dist
+.env
+.env.*
+*.log
+.git
+.vscode
+coverage
+backup_src
+src/scripts/data/*.xlsx
+src/scripts/data/*.xls
+docs
+*.md
+.claude
