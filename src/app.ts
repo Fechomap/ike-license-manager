@@ -9,6 +9,9 @@ import telegramService from './services/telegramService';
 const app = express();
 const PORT = config.port;
 
+// Confiar en proxy reverso (Railway, Docker, etc.) para X-Forwarded-For
+app.set('trust proxy', 1);
+
 // Middlewares
 app.use(express.json());
 app.use('/api', apiRoutes);
