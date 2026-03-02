@@ -5,7 +5,7 @@
   "main": "dist/app.js",
   "scripts": {
     "build": "prisma generate && tsc",
-    "start": "node dist/app.js",
+    "start": "prisma migrate deploy && node dist/app.js",
     "dev": "prisma generate && tsx watch src/app.ts",
     "typecheck": "prisma generate && tsc --noEmit",
     "prisma:generate": "prisma generate",
@@ -20,8 +20,8 @@
     "test": "npm run test:integration"
   },
   "engines": {
-    "node": ">=16.0.0",
-    "npm": ">=8.0.0"
+    "node": ">=22.12.0",
+    "npm": ">=10.0.0"
   },
   "keywords": [
     "license-manager",
