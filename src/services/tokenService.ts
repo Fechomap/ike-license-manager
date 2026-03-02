@@ -433,6 +433,15 @@ export async function validateAndRedeemToken(
   }
 
   if (tokenRecord.isRedeemed) {
+    // Si es la misma máquina y el token sigue vigente, permitir re-validación
+    if (tokenRecord.machineId === machineId && tokenRecord.expiresAt >= redeemedAt) {
+      return {
+        success: true,
+        valid: true,
+        message: 'Token re-validado en la misma máquina',
+        expiresAt: tokenRecord.expiresAt,
+      };
+    }
     return {
       success: false,
       valid: false,
@@ -443,6 +452,24 @@ export async function validateAndRedeemToken(
   }
 
   return { success: false, valid: false, message: 'Token expirado', errorCode: 'TOKEN_EXPIRED' };
+}
+
+/**
+ * Renovar un token: genera un nuevo valor de token y resetea la redención.
+ * Mantiene toda la información del usuario, fechas y pagos intactos.
+ * Retorna el nuevo token o null si no se encontró.
+ */
+export async function renewToken(tokenValue: string): Promise<string | null> {
+  const newToken = crypto.randomBytes(16).toString('hex');
+  const result = await prisma.token.updateMany({
+    where: { token: tokenValue },
+    data: {
+      token: newToken,
+      isRedeemed: false,
+      machineId: null,
+    },
+  });
+  return result.count === 1 ? newToken : null;
 }
 
 /**

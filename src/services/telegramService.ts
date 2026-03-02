@@ -225,6 +225,9 @@ class TelegramService {
 
         if (token.status === TokenStatus.active && token.remainingDays > 0) {
           buttons.push([{ text: '💰 Registrar Pago', callback_data: `pay:${token.token}` }]);
+          if (token.isRedeemed) {
+            buttons.push([{ text: '🔄 Renovar Token', callback_data: `renew:${token.token}` }]);
+          }
           buttons.push([
             { text: '🚫 Suspender', callback_data: `suspend:${token.token}` },
             { text: '❌ Cancelar', callback_data: `cancel:${token.token}` },
@@ -474,6 +477,32 @@ class TelegramService {
             chat_id: chatId,
             message_id: messageId,
           });
+          break;
+        }
+
+        case 'renew': {
+          if (!tokenId) {
+            break;
+          }
+          const newToken = await tokenService.renewToken(tokenId);
+          if (newToken) {
+            await this.bot.editMessageText(
+              `🔄 *Token renovado*\n\n` +
+                `Token anterior: \`${tokenId}\`\n` +
+                `Nuevo token: \`${newToken}\`\n\n` +
+                `📋 Envía el nuevo token al usuario para que lo ingrese en la app.`,
+              {
+                chat_id: chatId,
+                message_id: messageId,
+                parse_mode: 'Markdown',
+              },
+            );
+          } else {
+            await this.bot.editMessageText('⚠️ Token no encontrado.', {
+              chat_id: chatId,
+              message_id: messageId,
+            });
+          }
           break;
         }
       }
