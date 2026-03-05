@@ -4,6 +4,7 @@ import express, { type Request, type Response } from 'express';
 import config from './config/config';
 import connectDB from './config/database';
 import apiRoutes from './routes/apiRoutes';
+import { verifyConnection as verifySmtp } from './services/emailService';
 import telegramService from './services/telegramService';
 
 const app = express();
@@ -37,6 +38,9 @@ const startServer = async (): Promise<void> => {
     });
 
     console.log('\u{2705} Servicio de Telegram iniciado');
+
+    // Verificar SMTP (no bloquea el arranque)
+    void verifySmtp();
   } catch (error) {
     console.error('\u{274c} Error al iniciar el servidor:', error);
     process.exit(1);

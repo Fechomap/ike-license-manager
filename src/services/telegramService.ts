@@ -4,6 +4,7 @@ import TelegramBot from 'node-telegram-bot-api';
 import config from '../config/config';
 import { TokenStatus } from '../generated/prisma/enums';
 
+import { sendWelcomeEmail } from './emailService';
 import * as tokenService from './tokenService';
 
 // ---------------------------------------------------------------------------
@@ -766,6 +767,19 @@ class TelegramService {
             ],
           ],
         },
+      });
+
+      // Fire-and-forget: enviar email de bienvenida sin bloquear
+      void sendWelcomeEmail({
+        email: userData.email,
+        name: userData.name,
+        token: result.token,
+        expiresAt: result.expiresAt,
+      }).then((emailResult) => {
+        const msg = emailResult.success
+          ? `✅ Email enviado a ${userData.email}`
+          : `⚠️ Email no enviado: ${emailResult.message}`;
+        void this.bot.sendMessage(chatId, msg);
       });
     } catch (error: unknown) {
       console.error('Error al generar token:', error instanceof Error ? error.message : error);
