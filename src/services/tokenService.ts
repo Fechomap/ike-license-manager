@@ -3,7 +3,7 @@ import crypto from 'crypto';
 
 import * as XLSX from 'xlsx';
 
-import type { Payment, Token } from '../generated/prisma/client';
+import type { Machine, Payment, Token } from '../generated/prisma/client';
 import { TokenStatus } from '../generated/prisma/enums';
 import prisma from '../lib/prisma';
 import { getRedemptionDetails } from '../models/tokenModel';
@@ -58,6 +58,7 @@ export interface TokenWithRemainingDays {
   status: TokenStatus;
   statusReason: string | null;
   redemptionDetails?: { ip?: string; deviceInfo?: string; timestamp?: Date };
+  machines: Machine[];
   remainingDays: number;
 }
 
@@ -89,6 +90,7 @@ export interface PaymentResult {
 const GRACE_PERIOD_DAYS = 5;
 const EXPIRING_SOON_DAYS = 5;
 export const PRICE_PER_MONTH_MXN = 1500;
+export const MAX_MACHINES_PER_TOKEN = 3;
 
 // ---------------------------------------------------------------------------
 // Helpers internos
@@ -102,8 +104,7 @@ Token: ${tokenData.token}
 Válido hasta: ${tokenData.expiresAt.toLocaleDateString()}
 
 IMPORTANTE:
-- Este token solo puede ser redimido una vez
-- Solo puede ser usado en un dispositivo
+- Puede usarse en hasta ${MAX_MACHINES_PER_TOKEN} dispositivos
 - El mal uso puede resultar en cancelación
 
 Si tienes dudas, contáctanos.
@@ -292,6 +293,7 @@ export async function getAllTokens(
     orderBy: { createdAt: 'desc' },
     skip,
     ...(limit > 0 ? { take: limit } : {}),
+    include: { machines: true },
   });
 
   return tokens.map((token) => ({
@@ -309,7 +311,10 @@ export async function getTotalTokens(): Promise<number> {
  * Exporta la información de los tokens a un archivo Excel (formato .xlsx).
  */
 export async function exportToExcel(): Promise<Buffer> {
-  const tokens = await prisma.token.findMany({ orderBy: { createdAt: 'desc' } });
+  const tokens = await prisma.token.findMany({
+    orderBy: { createdAt: 'desc' },
+    include: { machines: true },
+  });
 
   // Mapear cada token a un objeto con el formato deseado
   const data = tokens.map((token) => {
@@ -338,6 +343,7 @@ export async function exportToExcel(): Promise<Buffer> {
       'Días Restantes': remainingDays,
       Estado: isActive ? 'Activo' : 'Expirado',
       Estado_Licencia: token.status,
+      Dispositivos: `${token.machines.length}/${MAX_MACHINES_PER_TOKEN}`,
     };
   });
 
@@ -356,6 +362,7 @@ export async function exportToExcel(): Promise<Buffer> {
     { wch: 15 }, // Días Restantes
     { wch: 10 }, // Estado
     { wch: 15 }, // Estado_Licencia
+    { wch: 14 }, // Dispositivos
   ];
 
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Tokens');
@@ -367,109 +374,157 @@ export async function exportToExcel(): Promise<Buffer> {
 
 /**
  * Valida y canjea (redime) un token de forma atómica.
- * Usa updateMany condicional para evitar condiciones de carrera:
- * solo actualiza si token existe, no está redimido y no ha expirado.
+ * Soporta hasta MAX_MACHINES_PER_TOKEN dispositivos por token.
+ * Usa transacción interactiva para garantizar atomicidad.
  */
 export async function validateAndRedeemToken(
   token: string,
   machineId: string,
   clientInfo: ClientInfo,
 ): Promise<ValidationResult> {
-  const redeemedAt = new Date();
-  const newExpiresAt = getFirstDayOfNextMonthAfterMonths(redeemedAt, 1);
+  return prisma.$transaction(async (tx) => {
+    const tokenRecord = await tx.token.findUnique({
+      where: { token },
+      include: { machines: true },
+    });
 
-  // Operación atómica: solo actualiza si cumple TODAS las condiciones
-  const result = await prisma.token.updateMany({
-    where: {
-      token,
-      isRedeemed: false,
-      expiresAt: { gte: redeemedAt },
-      status: TokenStatus.active,
-    },
-    data: {
-      isRedeemed: true,
-      redeemedAt,
-      machineId,
-      expiresAt: newExpiresAt,
-      redemptionIp: clientInfo.ip,
-      redemptionDeviceInfo: clientInfo.deviceInfo || 'No proporcionado',
-      redemptionTimestamp: redeemedAt,
-    },
-  });
+    if (!tokenRecord) {
+      return {
+        success: false,
+        valid: false,
+        message: 'Token no encontrado',
+        errorCode: 'TOKEN_NOT_FOUND',
+      } as const;
+    }
 
-  if (result.count === 1) {
-    return {
-      success: true,
-      valid: true,
-      message: 'Token validado y activado correctamente',
-      expiresAt: newExpiresAt,
-    };
-  }
+    if (tokenRecord.status !== TokenStatus.active) {
+      const statusErrorMap: Record<string, string> = {
+        suspended: 'TOKEN_SUSPENDED',
+        cancelled: 'TOKEN_CANCELLED',
+        expired: 'TOKEN_EXPIRED',
+      };
+      return {
+        success: false,
+        valid: false,
+        message: `Token ${tokenRecord.status}`,
+        errorCode: statusErrorMap[tokenRecord.status] || 'TOKEN_INACTIVE',
+      } as const;
+    }
 
-  // Si count === 0, determinar la razón exacta del fallo
-  const tokenRecord = await prisma.token.findUnique({ where: { token } });
+    const now = new Date();
 
-  if (!tokenRecord) {
-    return {
-      success: false,
-      valid: false,
-      message: 'Token no encontrado',
-      errorCode: 'TOKEN_NOT_FOUND',
-    };
-  }
+    // Verificar expiración (solo para tokens ya redimidos)
+    if (tokenRecord.isRedeemed && tokenRecord.expiresAt < now) {
+      return {
+        success: false,
+        valid: false,
+        message: 'Token expirado',
+        errorCode: 'TOKEN_EXPIRED',
+      } as const;
+    }
 
-  if (tokenRecord.status !== TokenStatus.active) {
-    const statusErrorMap: Record<string, string> = {
-      suspended: 'TOKEN_SUSPENDED',
-      cancelled: 'TOKEN_CANCELLED',
-      expired: 'TOKEN_EXPIRED',
-    };
-    return {
-      success: false,
-      valid: false,
-      message: `Token ${tokenRecord.status}`,
-      errorCode: statusErrorMap[tokenRecord.status] || 'TOKEN_INACTIVE',
-    };
-  }
+    // Verificar si el token no redimido ya expiró (ventana provisional)
+    if (!tokenRecord.isRedeemed && tokenRecord.expiresAt < now) {
+      return {
+        success: false,
+        valid: false,
+        message: 'Token expirado',
+        errorCode: 'TOKEN_EXPIRED',
+      } as const;
+    }
 
-  if (tokenRecord.isRedeemed) {
-    // Si es la misma máquina y el token sigue vigente, permitir re-validación
-    if (tokenRecord.machineId === machineId && tokenRecord.expiresAt >= redeemedAt) {
+    // Verificar si esta máquina ya está registrada → re-validación
+    const existingMachine = tokenRecord.machines.find((m) => m.machineId === machineId);
+    if (existingMachine) {
       return {
         success: true,
         valid: true,
         message: 'Token re-validado en la misma máquina',
         expiresAt: tokenRecord.expiresAt,
-      };
+      } as const;
     }
-    return {
-      success: false,
-      valid: false,
-      message: 'Token ya ha sido utilizado',
-      errorCode: 'TOKEN_ALREADY_REDEEMED',
-      redeemedAt: tokenRecord.redeemedAt,
-    };
-  }
 
-  return { success: false, valid: false, message: 'Token expirado', errorCode: 'TOKEN_EXPIRED' };
+    // Verificar límite de máquinas
+    if (tokenRecord.machines.length >= MAX_MACHINES_PER_TOKEN) {
+      return {
+        success: false,
+        valid: false,
+        message: `Límite de dispositivos alcanzado (${MAX_MACHINES_PER_TOKEN}/${MAX_MACHINES_PER_TOKEN})`,
+        errorCode: 'MAX_MACHINES_REACHED',
+      } as const;
+    }
+
+    // Registrar nueva máquina
+    await tx.machine.create({
+      data: {
+        machineId,
+        deviceInfo: clientInfo.deviceInfo || 'No proporcionado',
+        ip: clientInfo.ip,
+        tokenId: tokenRecord.id,
+      },
+    });
+
+    // Primera máquina → marcar como redimido y establecer expiración real
+    if (!tokenRecord.isRedeemed) {
+      const redeemedAt = now;
+      const newExpiresAt = getFirstDayOfNextMonthAfterMonths(redeemedAt, 1);
+
+      await tx.token.update({
+        where: { id: tokenRecord.id },
+        data: {
+          isRedeemed: true,
+          redeemedAt,
+          machineId,
+          expiresAt: newExpiresAt,
+          redemptionIp: clientInfo.ip,
+          redemptionDeviceInfo: clientInfo.deviceInfo || 'No proporcionado',
+          redemptionTimestamp: redeemedAt,
+        },
+      });
+
+      return {
+        success: true,
+        valid: true,
+        message: 'Token validado y activado correctamente',
+        expiresAt: newExpiresAt,
+      } as const;
+    }
+
+    return {
+      success: true,
+      valid: true,
+      message: 'Dispositivo registrado correctamente',
+      expiresAt: tokenRecord.expiresAt,
+    } as const;
+  });
 }
 
 /**
- * Renovar un token: genera un nuevo valor de token y resetea la redención.
- * Mantiene toda la información del usuario, fechas y pagos intactos.
+ * Renovar un token: genera un nuevo valor de token, resetea la redención
+ * y elimina todas las máquinas registradas.
  * Retorna el nuevo token o null si no se encontró.
  */
 export async function renewToken(tokenValue: string): Promise<string | null> {
+  const tokenRecord = await prisma.token.findUnique({ where: { token: tokenValue } });
+  if (!tokenRecord) {
+    return null;
+  }
+
   const newToken = crypto.randomBytes(16).toString('hex');
-  const result = await prisma.token.updateMany({
-    where: { token: tokenValue },
-    data: {
-      token: newToken,
-      isRedeemed: false,
-      machineId: null,
-    },
-  });
-  return result.count === 1 ? newToken : null;
+
+  await prisma.$transaction([
+    prisma.machine.deleteMany({ where: { tokenId: tokenRecord.id } }),
+    prisma.token.update({
+      where: { id: tokenRecord.id },
+      data: {
+        token: newToken,
+        isRedeemed: false,
+        machineId: null,
+      },
+    }),
+  ]);
+
+  return newToken;
 }
 
 /**
@@ -502,41 +557,50 @@ export async function getTokensByFilter(filter: TokenFilter): Promise<TokenWithR
   const now = new Date();
   const soonDate = new Date(now.getTime() + EXPIRING_SOON_DAYS * 24 * 60 * 60 * 1000);
 
-  let tokens: Token[];
+  const includeMachines = { include: { machines: true } } as const;
+  let tokens: (Token & { machines: Machine[] })[];
 
   switch (filter) {
     case 'active':
       tokens = await prisma.token.findMany({
         where: { status: TokenStatus.active, expiresAt: { gt: soonDate } },
         orderBy: { expiresAt: 'asc' },
+        ...includeMachines,
       });
       break;
     case 'expiring_soon':
       tokens = await prisma.token.findMany({
         where: { status: TokenStatus.active, expiresAt: { gt: now, lte: soonDate } },
         orderBy: { expiresAt: 'asc' },
+        ...includeMachines,
       });
       break;
     case 'expired':
       tokens = await prisma.token.findMany({
         where: { status: TokenStatus.active, expiresAt: { lt: now } },
         orderBy: { expiresAt: 'asc' },
+        ...includeMachines,
       });
       break;
     case 'suspended':
       tokens = await prisma.token.findMany({
         where: { status: TokenStatus.suspended },
         orderBy: { createdAt: 'desc' },
+        ...includeMachines,
       });
       break;
     case 'cancelled':
       tokens = await prisma.token.findMany({
         where: { status: TokenStatus.cancelled },
         orderBy: { createdAt: 'desc' },
+        ...includeMachines,
       });
       break;
     case 'all':
-      tokens = await prisma.token.findMany({ orderBy: { createdAt: 'desc' } });
+      tokens = await prisma.token.findMany({
+        orderBy: { createdAt: 'desc' },
+        ...includeMachines,
+      });
       break;
   }
 
@@ -574,6 +638,30 @@ export async function updateTokenStatus(
       statusReason: reason ?? null,
     },
   });
+}
+
+/**
+ * Obtener las máquinas registradas de un token.
+ */
+export async function getTokenMachines(tokenValue: string): Promise<Machine[]> {
+  const tokenRecord = await prisma.token.findUnique({
+    where: { token: tokenValue },
+    include: { machines: { orderBy: { addedAt: 'asc' } } },
+  });
+  return tokenRecord?.machines ?? [];
+}
+
+/**
+ * Eliminar una máquina específica por su ID.
+ * Retorna true si se eliminó, false si no se encontró.
+ */
+export async function removeMachine(machineDbId: string): Promise<boolean> {
+  try {
+    await prisma.machine.delete({ where: { id: machineDbId } });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

@@ -6,7 +6,6 @@ import * as path from 'path';
 
 import * as XLSX from 'xlsx';
 
-import type { Token } from '../generated/prisma/client';
 import prisma from '../lib/prisma';
 
 interface ExcelExportRow {
@@ -19,7 +18,8 @@ interface ExcelExportRow {
   Estado: string;
   Estado_Licencia: string;
   Fecha_Canje: string;
-  ID_Maquina: string;
+  Dispositivos: number;
+  IDs_Maquina: string;
   IP_Redencion: string;
   Dispositivo_Redencion: string;
   Timestamp_Redencion: string;
@@ -58,7 +58,7 @@ async function exportTokens(): Promise<void> {
     const scriptsDir = path.join(__dirname, 'data');
     await fs.mkdir(scriptsDir, { recursive: true });
 
-    const tokens: Token[] = await prisma.token.findMany();
+    const tokens = await prisma.token.findMany({ include: { machines: true } });
     console.log(`Encontrados ${tokens.length} tokens`);
 
     const excelData: ExcelExportRow[] = tokens.map((token) => ({
@@ -71,7 +71,8 @@ async function exportTokens(): Promise<void> {
       Estado: token.isRedeemed ? 'Canjeado' : 'No Canjeado',
       Estado_Licencia: token.status,
       Fecha_Canje: formatDate(token.redeemedAt),
-      ID_Maquina: token.machineId || '',
+      Dispositivos: token.machines.length,
+      IDs_Maquina: token.machines.map((m) => m.machineId).join(', '),
       IP_Redencion: token.redemptionIp || '',
       Dispositivo_Redencion: token.redemptionDeviceInfo || '',
       Timestamp_Redencion: formatDate(token.redemptionTimestamp),
@@ -91,7 +92,8 @@ async function exportTokens(): Promise<void> {
       { wch: 12 }, // Estado
       { wch: 15 }, // Estado_Licencia
       { wch: 25 }, // Fecha_Canje
-      { wch: 20 }, // ID_Maquina
+      { wch: 14 }, // Dispositivos
+      { wch: 50 }, // IDs_Maquina
       { wch: 15 }, // IP_Redencion
       { wch: 30 }, // Dispositivo_Redencion
       { wch: 25 }, // Timestamp_Redencion

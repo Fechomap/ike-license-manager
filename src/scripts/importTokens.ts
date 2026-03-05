@@ -25,6 +25,8 @@ interface ExcelRow {
   Fecha_Expiracion?: string;
   Fecha_Canje?: string;
   ID_Maquina?: string;
+  IDs_Maquina?: string;
+  Dispositivos?: string;
   IP_Redencion?: string;
   Dispositivo_Redencion?: string;
   Timestamp_Redencion?: string;
@@ -37,6 +39,7 @@ interface ExcelRow {
   Fecha_Expiración?: string;
   Fecha_Redención?: string;
   ID_Máquina?: string;
+  IDs_Máquina?: string;
   IP_Redención?: string;
   Dispositivo_Redención?: string;
   Timestamp_Redención?: string;
@@ -174,6 +177,7 @@ async function importTokens(): Promise<void> {
           row.Fecha_Expiracion || row['Fecha_Expiración'] || row['Fecha de Expiración'];
         const fechaCanjeStr = row.Fecha_Canje || row['Fecha_Redención'];
         const idMaquina = row.ID_Maquina || row['ID_Máquina'];
+        const idsMaquina = row.IDs_Maquina || row['IDs_Máquina'];
         const ipRedencion = row.IP_Redencion || row['IP_Redención'];
         const dispositivoRedencion = row.Dispositivo_Redencion || row['Dispositivo_Redención'];
         const estadoLicencia = row.Estado_Licencia;
@@ -232,6 +236,19 @@ async function importTokens(): Promise<void> {
         // Buscar si el token ya existe
         const existingToken = await prisma.token.findUnique({ where: { token: row.Token } });
 
+        // Resolver lista de machineIds: priorizar IDs_Maquina (multi), fallback a ID_Maquina (legacy)
+        const machineIds: string[] = [];
+        if (idsMaquina) {
+          machineIds.push(
+            ...idsMaquina
+              .split(',')
+              .map((s: string) => s.trim())
+              .filter(Boolean),
+          );
+        } else if (idMaquina) {
+          machineIds.push(idMaquina);
+        }
+
         if (existingToken) {
           // Actualizar token existente
           const updateFields: TokenUpdateFields = {
@@ -275,6 +292,22 @@ async function importTokens(): Promise<void> {
             data: updateFields,
           });
 
+          // Sincronizar máquinas: agregar las que no existan
+          for (const mid of machineIds) {
+            await prisma.machine.upsert({
+              where: {
+                tokenId_machineId: { tokenId: existingToken.id, machineId: mid },
+              },
+              update: {},
+              create: {
+                machineId: mid,
+                tokenId: existingToken.id,
+                ip: ipRedencion || null,
+                deviceInfo: dispositivoRedencion || null,
+              },
+            });
+          }
+
           results.updated++;
           console.log(`Actualizado token: ${row.Token}`);
         } else {
@@ -291,8 +324,8 @@ async function importTokens(): Promise<void> {
             status: tokenStatus,
           };
 
-          if (idMaquina) {
-            tokenData.machineId = idMaquina;
+          if (machineIds.length > 0) {
+            tokenData.machineId = machineIds[0];
           }
 
           if (dispositivoRedencion || ipRedencion) {
@@ -301,7 +334,19 @@ async function importTokens(): Promise<void> {
             tokenData.redemptionTimestamp = redeemedAt ?? new Date();
           }
 
-          await prisma.token.create({ data: tokenData });
+          const createdToken = await prisma.token.create({ data: tokenData });
+
+          // Crear registros Machine para cada machineId
+          for (const mid of machineIds) {
+            await prisma.machine.create({
+              data: {
+                machineId: mid,
+                tokenId: createdToken.id,
+                ip: ipRedencion || null,
+                deviceInfo: dispositivoRedencion || null,
+              },
+            });
+          }
 
           results.created++;
           console.log(`Creado nuevo token: ${row.Token}`);

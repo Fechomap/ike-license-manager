@@ -1,8 +1,8 @@
-import type { Token } from '../generated/prisma/client';
+import type { Machine, Token } from '../generated/prisma/client';
 import type { TokenStatus } from '../generated/prisma/enums';
 
 // Re-export de tipos generados por Prisma
-export type { Token, TokenStatus };
+export type { Machine, Token, TokenStatus };
 
 // Alias de compatibilidad para el resto del codigo
 export type ITokenDocument = Token;

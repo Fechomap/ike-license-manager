@@ -213,12 +213,14 @@ class TelegramService {
       for (const token of tokens) {
         const redeemStatus = token.isRedeemed ? '✅ Canjeado' : '⏳ No canjeado';
         const days = token.remainingDays || 0;
+        const machineCount = token.machines?.length ?? 0;
 
         const tokenMessage =
           `🔑 Token: ${token.token}\n` +
           `👤 Usuario: ${token.name || 'N/A'}\n` +
           `📧 Email: ${token.email || 'N/A'}\n` +
           `📅 Canje: ${redeemStatus}\n` +
+          `💻 Dispositivos: ${machineCount}/${tokenService.MAX_MACHINES_PER_TOKEN}\n` +
           `🏷️ Licencia: ${statusLabel(token.status)}\n` +
           `⏰ Días restantes: ${days}`;
 
@@ -227,7 +229,10 @@ class TelegramService {
         if (token.status === TokenStatus.active && token.remainingDays > 0) {
           buttons.push([{ text: '💰 Registrar Pago', callback_data: `pay:${token.token}` }]);
           if (token.isRedeemed) {
-            buttons.push([{ text: '🔄 Renovar Token', callback_data: `renew:${token.token}` }]);
+            buttons.push([
+              { text: '🔄 Renovar Token', callback_data: `renew:${token.token}` },
+              { text: '💻 Dispositivos', callback_data: `devices:${token.token}` },
+            ]);
           }
           buttons.push([
             { text: '🚫 Suspender', callback_data: `suspend:${token.token}` },
@@ -506,6 +511,72 @@ class TelegramService {
           }
           break;
         }
+
+        case 'devices': {
+          if (!tokenId) {
+            break;
+          }
+          const machines = await tokenService.getTokenMachines(tokenId);
+          if (machines.length === 0) {
+            await this.bot.editMessageText(
+              `💻 *Dispositivos* (0/${tokenService.MAX_MACHINES_PER_TOKEN})\n\nNo hay dispositivos registrados.`,
+              { chat_id: chatId, message_id: messageId, parse_mode: 'Markdown' },
+            );
+            break;
+          }
+
+          let devMsg = `💻 *Dispositivos* (${machines.length}/${tokenService.MAX_MACHINES_PER_TOKEN})\n\n`;
+          const devButtons: TelegramBot.InlineKeyboardButton[][] = [];
+
+          for (const [i, machine] of machines.entries()) {
+            const dateStr = machine.addedAt.toLocaleDateString('es-MX', {
+              day: '2-digit',
+              month: '2-digit',
+              year: 'numeric',
+            });
+            devMsg += `${i + 1}. \`${machine.machineId}\`\n`;
+            devMsg += `   📅 ${dateStr}`;
+            if (machine.ip) {
+              devMsg += ` | 🌐 ${machine.ip}`;
+            }
+            devMsg += '\n';
+
+            devButtons.push([
+              {
+                text: `🗑️ Liberar #${i + 1}: ${machine.machineId.slice(0, 16)}...`,
+                callback_data: `rmdev:${machine.id}`,
+              },
+            ]);
+          }
+
+          await this.bot.editMessageText(devMsg, {
+            chat_id: chatId,
+            message_id: messageId,
+            parse_mode: 'Markdown',
+            reply_markup: { inline_keyboard: devButtons },
+          });
+          break;
+        }
+
+        case 'rmdev': {
+          if (!tokenId) {
+            break;
+          }
+          // tokenId aquí es el Machine.id (cuid)
+          const removed = await tokenService.removeMachine(tokenId);
+          if (removed) {
+            await this.bot.editMessageText('✅ Dispositivo liberado correctamente.', {
+              chat_id: chatId,
+              message_id: messageId,
+            });
+          } else {
+            await this.bot.editMessageText('⚠️ Dispositivo no encontrado o ya fue liberado.', {
+              chat_id: chatId,
+              message_id: messageId,
+            });
+          }
+          break;
+        }
       }
     } catch (error: unknown) {
       console.error('Error en callback handler:', error instanceof Error ? error.message : error);
@@ -720,8 +791,7 @@ class TelegramService {
         `📱 Teléfono: ${userData.phone}\n` +
         `📅 Válido hasta: ${result.expiresAt.toLocaleDateString()}\n\n` +
         '⚠️ IMPORTANTE:\n' +
-        '• Este token solo puede ser redimido una vez\n' +
-        '• Solo puede usarse en un dispositivo\n' +
+        `• Puede usarse en hasta ${tokenService.MAX_MACHINES_PER_TOKEN} dispositivos\n` +
         '• El mal uso puede resultar en cancelación';
 
       await this.bot.sendMessage(chatId, telegramMessage, {
@@ -737,8 +807,7 @@ class TelegramService {
         `Teléfono: ${userData.phone}\n` +
         `Válido hasta: ${result.expiresAt.toLocaleDateString()}\n\n` +
         'IMPORTANTE:\n' +
-        '• Este token solo puede ser redimido una vez\n' +
-        '• Solo puede usarse en un dispositivo\n' +
+        `• Puede usarse en hasta ${tokenService.MAX_MACHINES_PER_TOKEN} dispositivos\n` +
         '• El mal uso puede resultar en cancelación';
 
       // Construir URLs

@@ -64,19 +64,23 @@ Definidos en `prisma/schema.prisma`.
 
 **Enum `TokenStatus`**: `active`, `expired`, `suspended`, `cancelled`.
 
-**Modelo Token**: `token` (hex 32 chars, unico), `email`, `name`, `phone`, `expiresAt`, `isRedeemed`, `machineId`, `status` (TokenStatus, default: active), `statusReason`, `redemptionIp`, `redemptionDeviceInfo`, `redemptionTimestamp`, `payments` (relacion con Payment).
+**Modelo Token**: `token` (hex 32 chars, unico), `email`, `name`, `phone`, `expiresAt`, `isRedeemed`, `machineId` (legacy, primera maquina), `status` (TokenStatus, default: active), `statusReason`, `redemptionIp`, `redemptionDeviceInfo`, `redemptionTimestamp`, `payments` (relacion con Payment), `machines` (relacion con Machine).
+
+**Modelo Machine**: `machineId` (String), `deviceInfo` (opcional), `ip` (opcional), `addedAt` (DateTime), `tokenId` (FK a Token, cascade delete). Constraint unique en `[tokenId, machineId]`. Cada token soporta hasta `MAX_MACHINES_PER_TOKEN` (3) dispositivos.
 
 **Modelo Payment**: `amount` (Float), `months` (Int), `paidAt` (DateTime), `note` (opcional), `tokenId` (FK a Token, cascade delete). Indices en `tokenId` y `paidAt`.
 
-**Nota**: Los campos de redencion (`redemptionIp`, `redemptionDeviceInfo`, `redemptionTimestamp`) son columnas planas en PostgreSQL. El helper `getRedemptionDetails()` en `tokenModel.ts` los reconstruye como objeto cuando se necesita compatibilidad.
+**Nota**: Los campos de redencion (`redemptionIp`, `redemptionDeviceInfo`, `redemptionTimestamp`) son columnas planas en PostgreSQL. El helper `getRedemptionDetails()` en `tokenModel.ts` los reconstruye como objeto cuando se necesita compatibilidad. El campo `machineId` en Token se mantiene por compatibilidad (primera maquina registrada).
 
 **Logica de expiracion**: los tokens expiran el **primer dia del mes siguiente** a su creacion/redencion, no por duracion fija. Los pagos ($1,500 MXN/mes) auto-renuevan el token calculando meses = monto/1500.
+
+**Multi-maquina**: Un token puede registrarse en hasta 3 dispositivos (`MAX_MACHINES_PER_TOKEN`). La primera maquina marca el token como redimido y establece `expiresAt`. Las siguientes solo crean registros en la tabla `machines`. Si se alcanza el limite, `POST /validate` retorna `errorCode: 'MAX_MACHINES_REACHED'`. El admin puede liberar dispositivos desde Telegram (boton "Dispositivos" → "Liberar"). `renewToken` elimina todas las maquinas registradas.
 
 ### API REST (prefijo `/api`)
 
 - `GET /status` — health check (publico)
 - `POST /login` — obtener JWT admin (body: `adminKey`) (publico, rate limited: 5 intentos/15min)
-- `POST /validate` — valida y redime un token, body: `token`, `machineId` (publico, maquina-a-servidor)
+- `POST /validate` — valida y redime un token, body: `token`, `machineId` (publico, maquina-a-servidor). Soporta hasta 3 dispositivos. Retorna `errorCode: 'MAX_MACHINES_REACHED'` si se excede el limite.
 - `GET /check-validity/:token` — verifica validez sin redimir (publico, maquina-a-servidor)
 - `GET /tokens` — lista todos los tokens con paginacion (protegido, requiere `Authorization: Bearer <JWT>`)
 - `PATCH /tokens/:token/status` — actualiza status de un token (protegido, requiere JWT)
@@ -87,7 +91,7 @@ Definidos en `prisma/schema.prisma`.
 - **Polling** en desarrollo, **Webhook** en producción (Railway)
 - Webhook endpoint: `POST /api/telegram-webhook`
 - Comandos: `/start`, `/generar_token`, `/listar_tokens`, `/tokens_caducando`, `/tokens_expirados`, `/exportar_excel`
-- Callbacks inline: `filter:*` (filtros), `pay:*` (registrar pago), `delete:*`, `suspend:*`, `cancel:*`, `reactivate:*`
+- Callbacks inline: `filter:*` (filtros), `pay:*` (registrar pago), `delete:*`, `suspend:*`, `cancel:*`, `reactivate:*`, `devices:*` (gestionar dispositivos), `rmdev:*` (liberar dispositivo)
 - Flujo conversacional de pago: monto (multiplo de $1,500) → fecha (DD/MM/AAAA o "hoy") → auto-renovacion
 
 ### Entorno

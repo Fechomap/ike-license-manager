@@ -31,11 +31,26 @@ model Token {
   status               TokenStatus @default(active)
   statusReason         String?
   payments             Payment[]
+  machines             Machine[]
 
   @@index([expiresAt])
   @@index([status])
   @@index([isRedeemed])
   @@map("tokens")
+}
+
+model Machine {
+  id         String   @id @default(cuid())
+  machineId  String
+  deviceInfo String?
+  ip         String?
+  addedAt    DateTime @default(now())
+  tokenId    String
+  token      Token    @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+
+  @@unique([tokenId, machineId])
+  @@index([tokenId])
+  @@map("machines")
 }
 
 model Payment {
