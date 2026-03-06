@@ -193,11 +193,30 @@ export async function createToken(userData: UserData): Promise<TokenWithShareLin
  * - Durante la gracia: valid=true, status='grace_period', graceDaysRemaining=N.
  * - Pasados los 5 días: se auto-suspende el token en BD.
  */
-export async function checkTokenStatus(token: string): Promise<TokenStatusResult | null> {
-  const tokenRecord = await prisma.token.findUnique({ where: { token } });
+export async function checkTokenStatus(
+  token: string,
+  machineId?: string,
+): Promise<TokenStatusResult | null> {
+  const tokenRecord = await prisma.token.findUnique({
+    where: { token },
+    include: { machines: true },
+  });
 
   if (!tokenRecord) {
     return null;
+  }
+
+  // Si se proporciona machineId, verificar que esté registrado
+  if (machineId && tokenRecord.isRedeemed) {
+    const machineRegistered = tokenRecord.machines.some((m) => m.machineId === machineId);
+    if (!machineRegistered) {
+      return {
+        valid: false,
+        status: 'machine_not_registered',
+        expiresAt: tokenRecord.expiresAt.toISOString(),
+        message: 'Dispositivo no registrado para este token',
+      };
+    }
   }
 
   const expiresAtISO = tokenRecord.expiresAt.toISOString();

@@ -162,7 +162,12 @@ export async function checkTokenValidity(req: Request, res: Response): Promise<v
       return;
     }
 
-    const result = await tokenService.checkTokenStatus(token);
+    const rawMachineId = req.query.machineId;
+    const machineId =
+      typeof rawMachineId === 'string' && isValidMachineId(rawMachineId)
+        ? rawMachineId
+        : undefined;
+    const result = await tokenService.checkTokenStatus(token, machineId);
 
     if (!result) {
       logStructured({
